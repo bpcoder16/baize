@@ -18,12 +18,12 @@ import (
 )
 
 // 环境、时区和标准流均绑定进程，每个变体在独立进程中验证。
-func TestInit(t *testing.T) {
+func TestRunInitialization(t *testing.T) {
 	mode := os.Getenv("BAIZE_INIT_TEST")
 	if mode == "" {
-		for _, mode := range []string{"normal", "hook", "log-error", "close-timeout"} {
+		for _, mode := range []string{"normal", "hook", "log-error", "close-timeout", "resource-error"} {
 			t.Run(mode, func(t *testing.T) {
-				cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestInit$")
+				cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestRunInitialization$")
 				cmd.Env = append(os.Environ(), "BAIZE_INIT_TEST="+mode)
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("%v\n%s", err, out)
@@ -48,12 +48,44 @@ func TestInit(t *testing.T) {
 	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
-	resources, err := bootstrap.Init(path)
+	if mode == "resource-error" {
+		var closed []string
+		failure := errors.New("resource failed")
+		step := func(name string) bootstrap.Resource {
+			return bootstrap.Resource{Name: name, Init: func(configDir string, stack *lifecycle.Stack) error {
+				if configDir != dir {
+					t.Fatalf("configDir = %q, want %q", configDir, dir)
+				}
+				if err := stack.Register(func() error {
+					closed = append(closed, name)
+					return nil
+				}); err != nil {
+					return err
+				}
+				if name == "second" {
+					return failure
+				}
+				return nil
+			}}
+		}
+		plan := bootstrap.Plan{Resources: []bootstrap.Resource{
+			step("first"),
+			step("second"),
+			step("third"),
+		}}
+		err := bootstrap.Run(t.Context(), path, plan)
+		if !errors.Is(err, failure) || strings.Join(closed, ",") != "second,first" {
+			t.Fatalf("error = %v, closed = %v", err, closed)
+		}
+		return
+	}
 	if mode == "log-error" {
-		if resources != nil || err == nil || !strings.Contains(err.Error(), "log.rotate.every") {
+		plan := bootstrap.Plan{}
+		err := bootstrap.Run(t.Context(), path, plan)
+		if err == nil || !strings.Contains(err.Error(), "log.rotate.every") {
 			t.Fatalf("invalid rotation accepted: %v", err)
 		}
-		if _, retryErr := bootstrap.Init(path); !errors.Is(retryErr, env.ErrAlreadyInitialized) {
+		if retryErr := bootstrap.Run(t.Context(), path, plan); !errors.Is(retryErr, env.ErrAlreadyInitialized) {
 			t.Fatalf("日志预检失败后再次初始化: %v", retryErr)
 		}
 		if time.Local != env.TimeLocation() || time.Local.String() != "Asia/Shanghai" {
@@ -61,39 +93,50 @@ func TestInit(t *testing.T) {
 		}
 		return
 	}
-	if err != nil {
-		t.Fatal(err)
-	}
 	if mode == "close-timeout" {
 		// 故意阻塞关闭回调。若配置未生效，回调会在默认期限前正常返回。
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
-		if registerErr := resources.Register(func() error {
-			<-ctx.Done()
-			return nil
-		}); registerErr != nil {
-			t.Fatal(registerErr)
+		plan := bootstrap.Plan{
+			Resources: []bootstrap.Resource{
+				{
+					Name: "slow-close",
+					Init: func(_ string, resources *lifecycle.Stack) error {
+						return resources.Register(func() error {
+							<-ctx.Done()
+							return nil
+						})
+					},
+				},
+			},
 		}
-		if closeErr := resources.Close(); !errors.Is(closeErr, lifecycle.ErrCloseTimeout) {
-			t.Fatalf("配置的资源关闭期限未生效: %v", closeErr)
+		if err := bootstrap.Run(t.Context(), path, plan); !errors.Is(err, lifecycle.ErrCloseTimeout) {
+			t.Fatalf("配置的资源关闭期限未生效: %v", err)
 		}
 		return
 	}
-	if env.ConfigDirPath() != dir || time.Local != env.TimeLocation() || time.Local.String() != "Asia/Shanghai" {
-		t.Fatal("配置目录或时区错误")
+	plan := bootstrap.Plan{
+		Prepare: []bootstrap.Step{
+			{
+				Name: "probe",
+				Init: func(_ context.Context, configDir string, resources *lifecycle.Stack) error {
+					if configDir != dir || env.ConfigDirPath() != dir || time.Local != env.TimeLocation() || time.Local.String() != "Asia/Shanghai" {
+						t.Fatal("配置目录或时区错误")
+					}
+					fmt.Fprintln(os.Stdout, "stdout probe")
+					return resources.Register(func() error {
+						logit.Named("audit").Info(context.Background(), "closing resource")
+						return nil
+					})
+				},
+			},
+		},
 	}
-	if _, err := bootstrap.Init(path); !errors.Is(err, env.ErrAlreadyInitialized) {
-		t.Fatalf("second init: %v", err)
-	}
-	if err := resources.Register(func() error {
-		logit.Named("audit").Info(context.Background(), "closing resource")
-		return nil
-	}); err != nil {
+	if err := bootstrap.Run(t.Context(), path, plan); err != nil {
 		t.Fatal(err)
 	}
-	fmt.Fprintln(os.Stdout, "stdout probe")
-	if err := resources.Close(); err != nil {
-		t.Fatal(err)
+	if err := bootstrap.Run(t.Context(), path, bootstrap.Plan{}); !errors.Is(err, env.ErrAlreadyInitialized) {
+		t.Fatalf("second run: %v", err)
 	}
 	read := func(name string) string {
 		t.Helper()

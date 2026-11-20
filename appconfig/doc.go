@@ -2,7 +2,7 @@
 //
 // # 单独读取配置
 //
-// 从白泽仓库的 conf.example/app.yaml 复制模板到宿主的 conf/。配置检查工具可单独调用 [Load]。
+// 从白泽仓库的 conf.example/app.yaml 复制模板到宿主的 conf/。配置检查工具可调用 [Load]。
 //
 //	cfg, err := appconfig.Load("./conf/app.yaml")
 //	if err != nil {
@@ -15,11 +15,12 @@
 //
 // # 从读取到初始化
 //
-// 命令行宿主可以用 os.Exit(bootstrap.RunCLI()) 初始化并退出。继续工作的宿主可调用
-// bootstrap.Init(path)，成功后在进程退出时关闭返回的资源栈。bootstrap 来自
-// github.com/bpcoder16/baize/bootstrap。Init 发布 Pixiu 环境并应用时区，然后预检日志参数并打开日志。
-// resourceCloseTimeout 控制返回的资源栈在 Close 时共享的总期限。省略或写 0s 使用 20 秒，负值在加载时返回错误。
-// 只含 env 段的文件可单独 Load，初始化还需要 env.appName、env.runMode、env.timeLocation 和 log.format。
+// 命令行宿主调用 os.Exit(bootstrap.RunCLI(plan))，已有 context 的宿主调用 bootstrap.Run(ctx, path, plan)。
+// bootstrap 来自 github.com/bpcoder16/baize/bootstrap。Run 发布 Pixiu 环境并应用时区，
+// 然后预检日志参数并打开日志，按清单执行准备步骤和服务，返回前关闭资源栈。
+// serviceShutdownTimeout 控制 Run 中全部服务停收和排空的总期限，省略或写 0s 使用 30 秒。
+// resourceCloseTimeout 控制资源栈回收的总期限。省略或写 0s 使用 20 秒，负值在加载时返回错误。
+// 只含 env 段的文件可单独解码，初始化还需要 env.appName、env.runMode、env.timeLocation 和 log.format。
 //
 // # 路径与配置兼容
 //
@@ -27,6 +28,6 @@
 // log.dir 的相对路径以进程启动工作目录为基准。例如，在 /srv/shop 加载 /etc/shop/app.yaml，
 // log.dir 为 ./log、应用名为 shop 时，默认 Info 日志位于 /srv/shop/log/shop/biz/info.log。
 //
-// disabledServices 兼容已有配置，目前只校验类型与实例名语法。四种类型的公开常量位于
-// github.com/bpcoder16/baize/constant。初始化不受服务开关影响。
+// disabledServices 由 Run 在服务构造前按类型或完整名称过滤。可用类型由
+// github.com/bpcoder16/baize/constant 中的 IsServiceType 白名单定义。
 package appconfig

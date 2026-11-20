@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前实现应用配置读取、进程环境、时区和日志初始化。Pixiu 版本为 `v0.1.12`。资源装配、业务准备和常驻服务将在后续阶段接入。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供命名 MySQL 适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
 
 ## 初始化一个宿主
 
@@ -31,13 +31,66 @@ import (
 )
 
 func main() {
-    os.Exit(bootstrap.RunCLI())
+    os.Exit(bootstrap.RunCLI(bootstrap.Plan{}))
 }
 ```
 
 在宿主目录运行 `go run .`，白泽读取配置并初始化环境、时区和日志，写入“白泽初始化完成”后关闭日志并退出。`go run . --conf /etc/cards/staging.yaml` 可指定其他文件，短参数为 `-c`，`go run . -h` 显示帮助。
 
-需要在初始化后继续工作的宿主可调用 `resources, err := bootstrap.Init(path)`，成功后持有资源栈，工作结束时调用 `resources.Close()` 并处理关闭错误。顶层配置 `resourceCloseTimeout` 控制整个栈的关闭时限，省略或写 `0s` 时为 20 秒。环境在每个进程内只发布一次。配置检查工具可单独调用 `appconfig.Load(path)`。相对路径、兼容字段和初始化边界见[包说明](appconfig/doc.go)。
+环境在每个进程内只发布一次。配置检查工具可调用 `appconfig.Load(path)`。相对路径、兼容字段和初始化边界见[包说明](appconfig/doc.go)。
+
+## 按需接入 MySQL
+
+在需要数据库的入口导入 `github.com/bpcoder16/baize/bootstrap/mysqlboot`，把 [MySQL 模板](conf.example/mysql.default.yaml) 复制为入口配置同目录下的 `mysql.orders.yaml`，填入连接参数。
+
+```go
+plan := bootstrap.Plan{
+    Resources: []bootstrap.Resource{
+        mysqlboot.Instances("orders"),
+    },
+    Prepare: []bootstrap.Step{
+        {
+            Name: "check-database",
+            Init: func(ctx context.Context, _ string, _ *lifecycle.Stack) error {
+                db := mysqlx.Named("orders").MasterDB(ctx)
+                return db.Exec("SELECT 1").Error
+            },
+        },
+    },
+}
+return bootstrap.Run(ctx, path, plan)
+```
+
+多实例在同一次调用中声明，如 `mysqlboot.Instances("orders", "audit")`。白泽先解析这一组的全部文件，再按顺序建连。每个名字都用 `mysqlx.Named(name)` 访问，包括名为 `default` 的实例。只使用基础入口的程序可以独立构建，MySQL 驱动仅随显式依赖它的入口链接。
+
+宿主自己的初始化可以作为下一项 `bootstrap.Resource{Name: "billing", Init: app.openBilling}` 加入 `Plan.Resources`。回调签名为 `func(configDir string, resources *lifecycle.Stack) error`，执行时可借用前面步骤已就绪的句柄。后续同样从命名 YAML 创建客户端的适配器可复用 `bootstrap.NamedInstances`，提供打开单个实例和统一关闭的函数即可。每类命名客户端由一个步骤统一管理，借用方无需再登记关闭。
+
+## 业务准备与常驻服务
+
+```go
+plan := bootstrap.Plan{
+    Resources: []bootstrap.Resource{
+        mysqlboot.Instances("orders"),
+    },
+    Prepare: []bootstrap.Step{
+        {Name: "migrate", Init: app.migrate},
+    },
+    Services: []bootstrap.Service{
+        {Name: "http", Build: app.buildHTTP},
+    },
+}
+return bootstrap.Run(ctx, path, plan)
+```
+
+`Step.Init(ctx, configDir, resources)` 在资源就绪后按顺序执行。宿主可在这里迁移、加载业务配置、绑定处理函数。新增资源立即登记到栈。已有的资源初始化函数沿用 `Init(configDir, resources)` 签名，可自行设置连接超时。
+
+`Service.Build(ctx, configDir)` 返回 `(apprun.Service, error)`。服务的名称以清单为准。全部构造成功后，Pixiu 并发运行服务。收到取消或任一服务退出时，先停收、排空全部服务，再逆序关闭资源和日志。服务回调支持在运行前停收，以便后续构造失败时回收。构造失败的步骤负责清理本次尚未移交的状态。
+
+`disabledServices` 在构造前按类型或完整名称过滤，允许的服务类型由 `constant.IsServiceType` 定义。没有声明服务时，业务准备完成即退出。声明的服务全部禁用时，返回 `apprun.ErrNoServices` 并跳过资源初始化。
+
+`serviceShutdownTimeout` 控制全部服务共用的停收及排空时限，默认 30 秒。超时后 Pixiu 通知尚未完成的服务取消，随后开始独立计算 `resourceCloseTimeout`（默认 20 秒）。两个字段均支持带单位的时间，省略或 `0s` 使用默认值，负值报错。
+
+`bootstrap.RunCLI(plan)` 解析命令行并接管 SIGINT、SIGTERM。宿主已有 context 时调用 `bootstrap.Run(ctx, path, plan)`。
 
 ## 目标目录
 

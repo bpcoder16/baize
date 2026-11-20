@@ -88,7 +88,7 @@ func initLog(cfg appconfig.LogConfig, resources *lifecycle.Stack) error {
 		if err != nil {
 			return err
 		}
-		// 成功构造的 Logger 交给应用栈，后续初始化失败也由 Init 回收。
+		// 成功构造的 Logger 交给应用栈，后续初始化失败时也会回收。
 		if registerErr := resources.Register(func() error { return logit.Close(logger) }); registerErr != nil {
 			return errors.Join(registerErr, logit.Close(logger))
 		}

@@ -23,7 +23,7 @@ func TestRunCLIExitCodes(t *testing.T) {
 		{[]string{"-unknown"}, 2},
 	} {
 		os.Args = append([]string{"demo"}, tc.args...)
-		if got := bootstrap.RunCLI(); got != tc.want {
+		if got := bootstrap.RunCLI(bootstrap.Plan{}); got != tc.want {
 			t.Errorf("RunCLI(%v) = %d, want %d", tc.args, got, tc.want)
 		}
 	}
