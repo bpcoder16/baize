@@ -1,4 +1,3 @@
-// Package appconfig 读取白泽应用启动配置。Load 可重复调用，环境和日志由 bootstrap 初始化。
 package appconfig
 
 import (
