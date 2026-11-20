@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供命名 MySQL 适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL 和 Redis 命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
 
 ## 初始化一个宿主
 
@@ -64,6 +64,22 @@ return bootstrap.Run(ctx, path, plan)
 多实例在同一次调用中声明，如 `mysqlboot.Instances("orders", "audit")`。白泽先解析这一组的全部文件，再按顺序建连。每个名字都用 `mysqlx.Named(name)` 访问，包括名为 `default` 的实例。只使用基础入口的程序可以独立构建，MySQL 驱动仅随显式依赖它的入口链接。
 
 宿主自己的初始化可以作为下一项 `bootstrap.Resource{Name: "billing", Init: app.openBilling}` 加入 `Plan.Resources`。回调签名为 `func(configDir string, resources *lifecycle.Stack) error`，执行时可借用前面步骤已就绪的句柄。后续同样从命名 YAML 创建客户端的适配器可复用 `bootstrap.NamedInstances`，提供打开单个实例和统一关闭的函数即可。每类命名客户端由一个步骤统一管理，借用方无需再登记关闭。
+
+## 按需接入 Redis
+
+在 `Plan.Resources` 中加入 `redisboot.Instances("default")`，把 [Redis 模板](conf.example/redis.default.yaml) 复制到入口配置同目录，填入单节点 Redis 的地址和凭据。一个入口使用多个 Redis 时，在同一次调用中列出所有实例名，并为每个实例提供 `redis.<name>.yaml`。
+
+```go
+// 装配包为 github.com/bpcoder16/baize/bootstrap/redisboot。
+plan := bootstrap.Plan{
+    Resources: []bootstrap.Resource{
+        mysqlboot.Instances("default"),
+        redisboot.Instances("default"),
+    },
+}
+```
+
+Redis 初始化时执行 `PING`。业务准备和服务中通过 `redisx.Named("default").Client()` 借用客户端，执行命令时传入调用方的 `ctx`。从 Biucards 迁移时可沿用原有 Redis YAML，将宿主封装中的 `redisx.Default()` 改为按名称取实例。示例按 MySQL、Redis 的顺序建连，Redis 启动失败时，白泽会关闭已打开的连接池，最后关闭日志。
 
 ## 业务准备与常驻服务
 
