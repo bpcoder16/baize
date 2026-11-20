@@ -37,7 +37,7 @@ func main() {
 
 在宿主目录运行 `go run .`，白泽读取配置并初始化环境、时区和日志，写入“白泽初始化完成”后关闭日志并退出。`go run . --conf /etc/cards/staging.yaml` 可指定其他文件，短参数为 `-c`，`go run . -h` 显示帮助。
 
-需要在初始化后继续工作的宿主可调用 `resources, err := bootstrap.Init(path)`，成功后持有资源栈，工作结束时调用 `resources.Close()` 并处理关闭错误。环境在每个进程内只发布一次。配置检查工具可单独调用 `appconfig.Load(path)`。相对路径、兼容字段和初始化边界见[包说明](appconfig/doc.go)。
+需要在初始化后继续工作的宿主可调用 `resources, err := bootstrap.Init(path)`，成功后持有资源栈，工作结束时调用 `resources.Close()` 并处理关闭错误。顶层配置 `resourceCloseTimeout` 控制整个栈的关闭时限，省略或写 `0s` 时为 20 秒。环境在每个进程内只发布一次。配置检查工具可单独调用 `appconfig.Load(path)`。相对路径、兼容字段和初始化边界见[包说明](appconfig/doc.go)。
 
 ## 目标目录
 

@@ -27,9 +27,12 @@ func Init(path string) (*lifecycle.Stack, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %q: %w", path, err)
 	}
-	var resources lifecycle.Stack
-	if err = initLog(logCfg, &resources); err != nil {
+	resources, err := lifecycle.New(cfg.ResourceCloseTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: %q resourceCloseTimeout: %w", path, err)
+	}
+	if err = initLog(logCfg, resources); err != nil {
 		return nil, errors.Join(fmt.Errorf("bootstrap: initialize logs from %q: %w", path, err), resources.Close())
 	}
-	return &resources, nil
+	return resources, nil
 }

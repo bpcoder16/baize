@@ -13,6 +13,7 @@ import (
 
 	"github.com/bpcoder16/baize/bootstrap"
 	"github.com/bpcoder16/pixiu/infra/env"
+	"github.com/bpcoder16/pixiu/lifecycle"
 	"github.com/bpcoder16/pixiu/logit"
 )
 
@@ -20,7 +21,7 @@ import (
 func TestInit(t *testing.T) {
 	mode := os.Getenv("BAIZE_INIT_TEST")
 	if mode == "" {
-		for _, mode := range []string{"normal", "hook", "log-error"} {
+		for _, mode := range []string{"normal", "hook", "log-error", "close-timeout"} {
 			t.Run(mode, func(t *testing.T) {
 				cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestInit$")
 				cmd.Env = append(os.Environ(), "BAIZE_INIT_TEST="+mode)
@@ -41,6 +42,9 @@ func TestInit(t *testing.T) {
 	if mode == "log-error" {
 		config += "  rotate: {every: 2h}\n"
 	}
+	if mode == "close-timeout" {
+		config += "resourceCloseTimeout: 25ms\n"
+	}
 	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +63,21 @@ func TestInit(t *testing.T) {
 	}
 	if err != nil {
 		t.Fatal(err)
+	}
+	if mode == "close-timeout" {
+		// 故意阻塞关闭回调。若配置未生效，回调会在默认期限前正常返回。
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		if registerErr := resources.Register(func() error {
+			<-ctx.Done()
+			return nil
+		}); registerErr != nil {
+			t.Fatal(registerErr)
+		}
+		if closeErr := resources.Close(); !errors.Is(closeErr, lifecycle.ErrCloseTimeout) {
+			t.Fatalf("配置的资源关闭期限未生效: %v", closeErr)
+		}
+		return
 	}
 	if env.ConfigDirPath() != dir || time.Local != env.TimeLocation() || time.Local.String() != "Asia/Shanghai" {
 		t.Fatal("配置目录或时区错误")

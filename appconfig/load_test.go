@@ -70,7 +70,7 @@ func TestLoadFormats(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.Env.AppName != "cards" || cfg.Log.HookStd != nil || cfg.Log.Rotate.MaxFiles != 0 {
+			if cfg.Env.AppName != "cards" || cfg.Log.HookStd != nil || cfg.Log.Rotate.MaxFiles != 0 || cfg.ResourceCloseTimeout != 0 {
 				t.Fatalf("unexpected config %+v", cfg)
 			}
 		})
@@ -82,6 +82,8 @@ func TestLoadErrors(t *testing.T) {
 		{"log:\n  caller: 'false'", "caller"},
 		{"env:\n  configDirPath: /wrong", "configdirpath"},
 		{"extra: null", "extra"},
+		{"resourceCloseTimeout: -1s", "resourceCloseTimeout"},
+		{"resourceCloseTimeout: forever", "resourceCloseTimeout"},
 		{"disabledServices: [crno]", "disabledServices[0]"},
 		{"disabledServices: [http, 'websocket:']", "disabledServices[1]"},
 		{"disabledServices: ['nats-consumer:a:b']", "disabledServices[0]"},

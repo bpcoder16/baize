@@ -18,6 +18,7 @@
 // 命令行宿主可以用 os.Exit(bootstrap.RunCLI()) 初始化并退出。继续工作的宿主可调用
 // bootstrap.Init(path)，成功后在进程退出时关闭返回的资源栈。bootstrap 来自
 // github.com/bpcoder16/baize/bootstrap。Init 发布 Pixiu 环境并应用时区，然后预检日志参数并打开日志。
+// resourceCloseTimeout 控制返回的资源栈在 Close 时共享的总期限。省略或写 0s 使用 20 秒，负值在加载时返回错误。
 // 只含 env 段的文件可单独 Load，初始化还需要 env.appName、env.runMode、env.timeLocation 和 log.format。
 //
 // # 路径与配置兼容
