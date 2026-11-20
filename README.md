@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、Redis 和 NATS 命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、Redis、NATS 和 Elasticsearch 命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
 
 ## 初始化一个宿主
 
@@ -93,6 +93,24 @@ return client.Publish(ctx, "orders.created", data)
 ```
 
 Core NATS 和 JetStream 共用该连接。向已有 Stream 发布并等待服务端确认时可用 `client.PublishJetStream(ctx, subject, data, messageID)`。客户端初始化只建立连接并创建 JetStream 上下文，使用 JetStream 发布时需要服务端启用 JetStream 并配置匹配主题的 Stream。客户端在资源栈关闭时统一排空。
+
+## 按需接入 Elasticsearch
+
+按集群主版本导入 `bootstrap/elasticsearchboot/v7`、`v8` 或 `v9`。例如，连接 Elasticsearch 8 时，入口只需导入对应的装配包：
+
+```go
+import esv8 "github.com/bpcoder16/baize/bootstrap/elasticsearchboot/v8"
+```
+
+将 `esv8.Instances("default")` 加入 `Plan.Resources`，并将 [Elasticsearch 模板](conf.example/elasticsearch.default.yaml) 复制为入口配置同目录下的 `elasticsearch.default.yaml`。同一集群的多个节点写入 `addresses`。启动时会通过 `GET /` 校验集群主版本。迁移旧配置时删除 `version` 字段，保留连接参数。`caCertFile` 的相对路径从该实例 YAML 所在目录解析。
+
+连接同一主版本的多个集群可用 `esv8.Instances("default", "archive")`。如果 `archive` 使用 v7，则同时导入 v7 和 v8，在一个资源步骤中声明 `elasticsearchboot.Instances(esv8.Named("default"), esv7.Named("archive"))`。每个实例各有一份 `elasticsearch.<实例名>.yaml`。
+
+```go
+// 资源就绪后，通过 github.com/bpcoder16/pixiu/infra/elasticsearchx 按名称借用客户端。
+client := elasticsearchx.Named("default")
+count, err := client.Count(ctx, "products", query)
+```
 
 ## 业务准备与常驻服务
 

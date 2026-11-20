@@ -8,3 +8,6 @@ const ResourceRedis = "redis"
 
 // ResourceNATS 是命名 NATS 资源的类型和配置文件前缀。
 const ResourceNATS = "nats"
+
+// ResourceElasticsearch 是命名 Elasticsearch 资源的类型和配置文件前缀。
+const ResourceElasticsearch = "elasticsearch"
