@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、Redis、NATS 和 Elasticsearch 命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、Redis、NATS、Elasticsearch、阿里云 OSS 和 STS 命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
 
 ## 初始化一个宿主
 
@@ -111,6 +111,28 @@ import esv8 "github.com/bpcoder16/baize/bootstrap/elasticsearchboot/v8"
 client := elasticsearchx.Named("default")
 count, err := client.Count(ctx, "products", query)
 ```
+
+## 按需接入阿里云 OSS 和 STS
+
+按需导入 `github.com/bpcoder16/baize/bootstrap/aliyunossboot` 和 `github.com/bpcoder16/baize/bootstrap/aliyunstsboot`。两个客户端可独立使用。
+
+```go
+plan := bootstrap.Plan{
+    Resources: []bootstrap.Resource{
+        aliyunossboot.Instances("default"),
+        aliyunstsboot.Instances("oss"),
+    },
+}
+```
+
+| 客户端 | 入口配置同目录下的实例文件 | 业务中获取客户端 |
+| --- | --- | --- |
+| OSS | [aliyunossx.default.yaml](conf.example/aliyunossx.default.yaml) | `ossx.Named("default")` |
+| STS | [aliyunstsx.oss.yaml](conf.example/aliyunstsx.oss.yaml) | `stsx.Named("oss")` |
+
+业务端从 `github.com/bpcoder16/pixiu/infra/aliyun/ossx` 或 `github.com/bpcoder16/pixiu/infra/aliyun/stsx` 按名称取得客户端。每个 OSS 实例绑定一个 Bucket。多个桶可一次声明，例如 `aliyunossboot.Instances("geca-public", "geca-private")`，每个实例各配一份 YAML。已有 Pixiu 或 Biucards 项目可以沿用同名实例文件。
+
+启动时在本地构造客户端。访问 OSS 时使用该实例配置的凭据。需要签发临时凭据时，业务调用 `stsx.Named("oss").AssumeRole(ctx, req)`，在请求中指定角色 ARN、有效期和可选策略。
 
 ## 业务准备与常驻服务
 
