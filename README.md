@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL 和 Redis 命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、Redis 和 NATS 命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
 
 ## 初始化一个宿主
 
@@ -80,6 +80,19 @@ plan := bootstrap.Plan{
 ```
 
 Redis 初始化时执行 `PING`。业务准备和服务中通过 `redisx.Named("default").Client()` 借用客户端，执行命令时传入调用方的 `ctx`。从 Biucards 迁移时可沿用原有 Redis YAML，将宿主封装中的 `redisx.Default()` 改为按名称取实例。示例按 MySQL、Redis 的顺序建连，Redis 启动失败时，白泽会关闭已打开的连接池，最后关闭日志。
+
+## 按需接入 NATS
+
+在 `Plan.Resources` 中加入 `natsboot.Instances("default")`，将 [NATS 配置模板](conf.example/nats.default.yaml) 放到入口配置同目录。多个逻辑实例在一次调用中声明，例如 `natsboot.Instances("default", "events")`，每个实例读取自己的 `nats.<实例名>.yaml`。同一集群的多个节点填在同一份文件的 `urls` 中。
+
+```go
+// 装配包为 github.com/bpcoder16/baize/bootstrap/natsboot。
+// 在资源就绪后的业务代码中，通过 github.com/bpcoder16/pixiu/infra/natsx 借用实例。
+client := natsx.Named("default")
+return client.Publish(ctx, "orders.created", data)
+```
+
+Core NATS 和 JetStream 共用该连接。向已有 Stream 发布并等待服务端确认时可用 `client.PublishJetStream(ctx, subject, data, messageID)`。客户端初始化只建立连接并创建 JetStream 上下文，使用 JetStream 发布时需要服务端启用 JetStream 并配置匹配主题的 Stream。客户端在资源栈关闭时统一排空。
 
 ## 业务准备与常驻服务
 
