@@ -21,7 +21,7 @@ type Config struct {
 
 	// ServiceShutdownTimeout 是所有常驻服务共享的停收及排空期限，零值使用 apprun 默认的 30 秒。
 	ServiceShutdownTimeout time.Duration `mapstructure:"serviceShutdownTimeout"`
-	// ResourceCloseTimeout 是整个资源栈共享的关闭期限，零值使用 lifecycle 默认的 20 秒。
+	// ResourceCloseTimeout 是整个资源栈共享的关闭期限，零值由 bootstrap.Run 按 30 秒处理。
 	ResourceCloseTimeout time.Duration `mapstructure:"resourceCloseTimeout"`
 }
 

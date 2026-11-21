@@ -42,7 +42,12 @@ func Run(ctx context.Context, path string, plan Plan) (err error) {
 	if err != nil {
 		return fmt.Errorf("bootstrap: %q: %w", path, err)
 	}
-	resources, err := lifecycle.New(cfg.ResourceCloseTimeout)
+	// 在装配层应用默认值，使停机预算与所用 Pixiu 版本解耦。
+	closeTimeout := cfg.ResourceCloseTimeout
+	if closeTimeout == 0 {
+		closeTimeout = 30 * time.Second
+	}
+	resources, err := lifecycle.New(closeTimeout)
 	if err != nil {
 		return fmt.Errorf("bootstrap: %q resourceCloseTimeout: %w", path, err)
 	}

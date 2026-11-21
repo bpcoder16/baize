@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/bpcoder16/baize/bootstrap"
@@ -21,7 +22,7 @@ import (
 func TestRunInitialization(t *testing.T) {
 	mode := os.Getenv("BAIZE_INIT_TEST")
 	if mode == "" {
-		for _, mode := range []string{"normal", "hook", "log-error", "close-timeout", "resource-error"} {
+		for _, mode := range []string{"normal", "hook", "log-error", "close-timeout", "close-omitted", "close-zero", "resource-error"} {
 			t.Run(mode, func(t *testing.T) {
 				cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestRunInitialization$")
 				cmd.Env = append(os.Environ(), "BAIZE_INIT_TEST="+mode)
@@ -44,6 +45,9 @@ func TestRunInitialization(t *testing.T) {
 	}
 	if mode == "close-timeout" {
 		config += "resourceCloseTimeout: 25ms\n"
+	}
+	if mode == "close-zero" {
+		config += "resourceCloseTimeout: 0s\n"
 	}
 	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
 		t.Fatal(err)
@@ -93,26 +97,36 @@ func TestRunInitialization(t *testing.T) {
 		}
 		return
 	}
-	if mode == "close-timeout" {
-		// 故意阻塞关闭回调。若配置未生效，回调会在默认期限前正常返回。
-		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-		defer cancel()
-		plan := bootstrap.Plan{
-			Resources: []bootstrap.Resource{
-				{
-					Name: "slow-close",
-					Init: func(_ string, resources *lifecycle.Stack) error {
-						return resources.Register(func() error {
-							<-ctx.Done()
-							return nil
-						})
-					},
+	if strings.HasPrefix(mode, "close-") {
+		want := 30 * time.Second
+		if mode == "close-timeout" {
+			want = 25 * time.Millisecond
+		}
+		synctest.Test(t, func(t *testing.T) {
+			release := make(chan struct{})
+			defer close(release)
+			step := bootstrap.Resource{
+				Name: "slow-close",
+				Init: func(_ string, resources *lifecycle.Stack) error {
+					return resources.Register(func() error {
+						<-release
+						return nil
+					})
 				},
-			},
-		}
-		if err := bootstrap.Run(t.Context(), path, plan); !errors.Is(err, lifecycle.ErrCloseTimeout) {
-			t.Fatalf("配置的资源关闭期限未生效: %v", err)
-		}
+			}
+			start := time.Now()
+			err := bootstrap.Run(t.Context(), path, bootstrap.Plan{Resources: []bootstrap.Resource{step}})
+			elapsed := time.Since(start)
+			// 资源栈超时会跳过日志回收，在虚拟时钟退出前关闭日志的后台任务。
+			for _, logger := range []logit.Logger{logit.Named("audit"), logit.Default()} {
+				if closeErr := logit.Close(logger); closeErr != nil {
+					t.Error(closeErr)
+				}
+			}
+			if !errors.Is(err, lifecycle.ErrCloseTimeout) || elapsed != want {
+				t.Fatalf("资源回收耗时 %s，期望 %s，错误为 %v", elapsed, want, err)
+			}
+		})
 		return
 	}
 	plan := bootstrap.Plan{

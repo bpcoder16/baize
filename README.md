@@ -61,7 +61,7 @@ plan := bootstrap.Plan{
 return bootstrap.Run(ctx, path, plan)
 ```
 
-多实例在同一次调用中声明，如 `mysqlboot.Instances("orders", "audit")`。白泽先解析这一组的全部文件，再按顺序建连。每个名字都用 `mysqlx.Named(name)` 访问，包括名为 `default` 的实例。只使用基础入口的程序可以独立构建，MySQL 驱动仅随显式依赖它的入口链接。
+多实例在同一次调用中声明，如 `mysqlboot.Instances("orders", "audit")`。白泽先解析这一组的全部文件，再按顺序建连。这组实例作为一个资源步骤。`Run` 在每个资源步骤开始前检查取消。组内建连期间收到取消时，当前组会继续到全部打开或首次出错，随后回收已登记的资源。每个名字都用 `mysqlx.Named(name)` 访问，包括名为 `default` 的实例。只使用基础入口的程序可以独立构建，MySQL 驱动仅随显式依赖它的入口链接。
 
 宿主自己的初始化可以作为下一项 `bootstrap.Resource{Name: "billing", Init: app.openBilling}` 加入 `Plan.Resources`。回调签名为 `func(configDir string, resources *lifecycle.Stack) error`，执行时可借用前面步骤已就绪的句柄。后续同样从命名 YAML 创建客户端的适配器可复用 `bootstrap.NamedInstances`，提供打开单个实例和统一关闭的函数即可。每类命名客户端由一个步骤统一管理，借用方无需再登记关闭。
 
@@ -171,7 +171,7 @@ return bootstrap.Run(ctx, path, plan)
 
 `disabledServices` 在构造前按类型或完整名称过滤，允许的服务类型由 `constant.IsServiceType` 定义。没有声明服务时，业务准备完成即退出。声明的服务全部禁用时，返回 `apprun.ErrNoServices` 并跳过资源初始化。
 
-`serviceShutdownTimeout` 控制全部服务共用的停收及排空时限，默认 30 秒。超时后 Pixiu 通知尚未完成的服务取消，随后开始独立计算 `resourceCloseTimeout`（默认 20 秒）。两个字段均支持带单位的时间，省略或 `0s` 使用默认值，负值报错。
+`serviceShutdownTimeout` 控制全部服务共用的停收及排空时限，默认 30 秒。超时后 Pixiu 通知尚未完成的服务取消，随后开始独立计算 `resourceCloseTimeout`（默认 30 秒）。单个 NATS 客户端的 `closeTimeout` 默认 20 秒，计入资源阶段。多个 NATS 实例逐个关闭，部署时应为其他客户端和日志预留回收时间。`app.yaml` 中的两个停机超时字段均支持带单位的时间，省略或 `0s` 使用默认值，负值报错。
 
 `bootstrap.RunCLI(plan)` 解析命令行并接管 SIGINT、SIGTERM。宿主已有 context 时调用 `bootstrap.Run(ctx, path, plan)`。
 

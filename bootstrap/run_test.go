@@ -21,7 +21,7 @@ import (
 func TestRunPlan(t *testing.T) {
 	mode := os.Getenv("BAIZE_TEST_PLAN")
 	if mode == "" {
-		for _, mode := range []string{"once", "disabled", "serve", "prepare-error", "build-error", "invalid-service", "unexpected-exit", "timeout"} {
+		for _, mode := range []string{"once", "disabled", "serve", "cancel-resource-group", "prepare-error", "build-error", "invalid-service", "unexpected-exit", "timeout"} {
 			t.Run(mode, func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
 				defer cancel()
@@ -130,6 +130,29 @@ func TestRunPlan(t *testing.T) {
 		plan.Services = plan.Services[:2]
 		wantErr = apprun.ErrNoServices
 		want = nil
+	case "cancel-resource-group":
+		names := []string{"orders", "audit"}
+		for _, name := range names {
+			if err := os.WriteFile(filepath.Join(dir, "sample."+name+".yaml"), []byte("{}\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		group := bootstrap.NamedInstances("sample", names, func(name string, _ *struct{}) error {
+			record("open " + name)
+			cancel()
+			return nil
+		}, func() error {
+			record("close sample")
+			return nil
+		})
+		plan.Resources = append(plan.Resources, group, bootstrap.Resource{
+			Name: "after-sample",
+			Init: func(string, *lifecycle.Stack) error {
+				return errors.New("取消后仍执行了下一项资源初始化")
+			},
+		})
+		wantErr = context.Canceled
+		want = []string{"resource", "open orders", "open audit", "close sample"}
 	case "prepare-error":
 		wantErr = failure
 	case "build-error":
