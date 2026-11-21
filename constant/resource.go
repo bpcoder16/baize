@@ -3,6 +3,15 @@ package constant
 // ResourceMySQL 是命名 MySQL 资源的类型和配置文件前缀。
 const ResourceMySQL = "mysql"
 
+// ResourcePostgreSQL 是命名 PostgreSQL 资源的类型和配置文件前缀。
+const ResourcePostgreSQL = "postgresql"
+
+// ResourceClickHouse 是命名 ClickHouse 资源的类型和配置文件前缀。
+const ResourceClickHouse = "clickhouse"
+
+// ResourceSQLite 是命名 SQLite 资源的类型和配置文件前缀。
+const ResourceSQLite = "sqlite"
+
 // ResourceRedis 是命名 Redis 资源的类型和配置文件前缀。
 const ResourceRedis = "redis"
 

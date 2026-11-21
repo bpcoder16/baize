@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、Redis、NATS、Elasticsearch、阿里云 OSS 和 STS 命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS 和 STS 命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
 
 ## 初始化一个宿主
 
@@ -64,6 +64,20 @@ return bootstrap.Run(ctx, path, plan)
 多实例在同一次调用中声明，如 `mysqlboot.Instances("orders", "audit")`。白泽先解析这一组的全部文件，再按顺序建连。每个名字都用 `mysqlx.Named(name)` 访问，包括名为 `default` 的实例。只使用基础入口的程序可以独立构建，MySQL 驱动仅随显式依赖它的入口链接。
 
 宿主自己的初始化可以作为下一项 `bootstrap.Resource{Name: "billing", Init: app.openBilling}` 加入 `Plan.Resources`。回调签名为 `func(configDir string, resources *lifecycle.Stack) error`，执行时可借用前面步骤已就绪的句柄。后续同样从命名 YAML 创建客户端的适配器可复用 `bootstrap.NamedInstances`，提供打开单个实例和统一关闭的函数即可。每类命名客户端由一个步骤统一管理，借用方无需再登记关闭。
+
+## 按需接入 PostgreSQL、ClickHouse 和 SQLite
+
+从 `github.com/bpcoder16/baize/bootstrap/` 导入所需数据库的装配包，将实例声明加入 `Plan.Resources`。实例文件放在入口配置同目录，每种数据库可一次声明多个名称，例如 `postgresqlboot.Instances("orders", "audit")`。
+
+| 数据库 | 启动声明 | 业务中取得 GORM 会话 | 示例配置 |
+| --- | --- | --- | --- |
+| PostgreSQL | `postgresqlboot.Instances("default")` | `postgresqlx.Named("default").MasterDB(ctx)` | [postgresql.default.yaml](conf.example/postgresql.default.yaml) |
+| ClickHouse | `clickhouseboot.Instances("default")` | `clickhousex.Named("default").MasterDB(ctx)` | [clickhouse.default.yaml](conf.example/clickhouse.default.yaml) |
+| SQLite | `sqliteboot.Instances("default")` | `sqlitex.Named("default").DB(ctx)` | [sqlite.default.yaml](conf.example/sqlite.default.yaml) |
+
+业务客户端分别位于 Pixiu 的 `infra/postgresqlx`、`infra/clickhousex`、`infra/sqlitex`。PostgreSQL 沿用 Pixiu 的 `postgresql.<实例名>.yaml`，包括证书路径及 SQL 日志默认值。PostgreSQL 和 ClickHouse 都通过 `SlaveDB(ctx)` 轮询从库，省略从库时回到主库。ClickHouse 可选择 Native 或 HTTP 协议，开启 TLS 时使用系统 CA 校验对应节点。
+
+SQLite 使用 CGO 驱动，构建该入口时需要启用 CGO 并安装 C 编译器。示例用 `:memory:` 创建单连接内存库，进程退出后数据释放。需要持久化时填写文件路径或 `file:` URI，并提前创建父目录。相对路径以进程工作目录为准。
 
 ## 按需接入 Redis
 
