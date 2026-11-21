@@ -7,6 +7,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/bpcoder16/pixiu v0.1.12
 	github.com/redis/go-redis/v9 v9.23.0
+	gorm.io/gorm v1.31.2
 )
 
 require (
@@ -83,5 +84,4 @@ require (
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/driver/postgres v1.6.3 // indirect
 	gorm.io/driver/sqlite v1.6.0 // indirect
-	gorm.io/gorm v1.31.2 // indirect
 )

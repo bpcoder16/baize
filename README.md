@@ -81,6 +81,23 @@ PostgreSQL 的 `sslRootCert`、`sslCert` 和 `sslKey` 填相对文件路径时�
 
 SQLite 使用 CGO 驱动，构建该入口时需要启用 CGO 并安装 C 编译器。示例用 `:memory:` 创建单连接内存库，进程退出后数据释放。需要持久化时填写文件路径或 `file:` URI，并提前创建父目录。相对路径以进程工作目录为准。
 
+## 在 Prepare 中迁移 MySQL 和 PostgreSQL
+
+为需要迁移的实例声明步骤，使用已在 `Plan.Resources` 打开的主库。宿主提供 `[]schemamigrate.Table`，可按数据库传入各自的模型和种子 SQL。以下示例仅迁移表结构。
+
+```go
+Prepare: []bootstrap.Step{
+    mysqlboot.PrepareMigration("default", mysqlTables, mysqlboot.SeedOptions{}),
+    postgresqlboot.PrepareMigration("default", pgTables, postgresqlboot.SeedOptions{}),
+},
+```
+
+声明步骤后，在入口配置同目录提供 `mysql-migrate.<实例名>.yaml` 或 `postgresql-migrate.<实例名>.yaml`。两份文件独立生效，`enabled` 默认关闭，同时控制迁表和种子。迁移 Biucards 旧配置时，将 `migrate.default.yaml` 改名为 `mysql-migrate.default.yaml`。[MySQL 模板](conf.example/mysql-migrate.default.yaml) · [PostgreSQL 模板](conf.example/postgresql-migrate.default.yaml)
+
+启用后，Pixiu 按清单迁表，成功后再执行种子。通过 `SeedOptions{Files: files, Seeds: seeds}` 提供内嵌 SQL 和种子清单。每个实例的 YAML `timeout` 是迁表和种子共用的总时限，默认 `5m`。种子使用迁表后剩余的时间，启动 context 提前取消时，两阶段均响应取消。任一步失败会中止启动，已经完成的表或已提交的种子项可能保留。
+
+每次部署只启用一个执行迁移的进程。种子按声明范围比较行数，数量一致时保留数据，数量不同时在单项事务中删除该范围并重新导入。`Charset` 和 `Collation` 仅用于 MySQL，种子 SQL 须适用于目标数据库。
+
 ## 按需接入 Redis
 
 在 `Plan.Resources` 中加入 `redisboot.Instances("default")`，把 [Redis 模板](conf.example/redis.default.yaml) 复制到入口配置同目录，填入单节点 Redis 的地址和凭据。一个入口使用多个 Redis 时，在同一次调用中列出所有实例名，并为每个实例提供 `redis.<name>.yaml`。
@@ -169,7 +186,7 @@ plan := bootstrap.Plan{
         mysqlboot.Instances("orders"),
     },
     Prepare: []bootstrap.Step{
-        {Name: "migrate", Init: app.migrate},
+        mysqlboot.PrepareMigration("orders", app.Tables(), mysqlboot.SeedOptions{}),
     },
     Services: []bootstrap.Service{
         {Name: "http", Build: app.buildHTTP},

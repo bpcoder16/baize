@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
 	"github.com/bpcoder16/pixiu/infra/apprun"
 	"github.com/bpcoder16/pixiu/logit"
 )
@@ -27,7 +28,7 @@ func validateServices(services []Service) error {
 			return err
 		}
 		kind, name, named := strings.Cut(service.Name, ":")
-		if !instanceKey.MatchString(kind) || (named && !instanceKey.MatchString(name)) {
+		if !instancekey.Valid(kind) || (named && !instancekey.Valid(name)) {
 			return fmt.Errorf("bootstrap: invalid service name %q", service.Name)
 		}
 	}

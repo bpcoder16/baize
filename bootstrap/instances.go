@@ -3,14 +3,12 @@ package bootstrap
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"slices"
 
+	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
 	"github.com/bpcoder16/pixiu/infra/configx"
 	"github.com/bpcoder16/pixiu/lifecycle"
 )
-
-var instanceKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // NamedInstances 为同类命名客户端创建一个资源步骤。kind 和实例名只含 ASCII 字母、数字、下划线或连字符。
 // 每类声明一次，至少传一个名称。全部 <kind>.<name>.yaml 严格解码成功后，按声明顺序调用 open。
@@ -18,7 +16,7 @@ var instanceKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 func NamedInstances[F any](kind string, names []string, open func(string, *F) error, closeAll func() error) Resource {
 	names = slices.Clone(names)
 	initGroup := func(configDir string, resources *lifecycle.Stack) error {
-		if !instanceKey.MatchString(kind) {
+		if !instancekey.Valid(kind) {
 			return fmt.Errorf("invalid instance kind %q", kind)
 		}
 		if len(names) == 0 {
@@ -33,7 +31,7 @@ func NamedInstances[F any](kind string, names []string, open func(string, *F) er
 		seen := make(map[string]bool, len(names))
 		configs := make([]*F, len(names))
 		for i, name := range names {
-			if !instanceKey.MatchString(name) {
+			if !instancekey.Valid(name) {
 				return fmt.Errorf("invalid instance name %q", name)
 			}
 			if seen[name] {
