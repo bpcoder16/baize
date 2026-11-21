@@ -92,10 +92,17 @@ plan := bootstrap.Plan{
         mysqlboot.Instances("default"),
         redisboot.Instances("default"),
     },
+    Prepare: []bootstrap.Step{
+        redisboot.PrepareLock("default", "default", redislock.Config{}),
+    },
 }
 ```
 
 Redis 初始化时执行 `PING`。业务准备和服务中通过 `redisx.Named("default").Client()` 借用客户端，执行命令时传入调用方的 `ctx`。从 Biucards 迁移时可沿用原有 Redis YAML，将宿主封装中的 `redisx.Default()` 改为按名称取实例。示例按 MySQL、Redis 的顺序建连，Redis 启动失败时，白泽会关闭已打开的连接池，最后关闭日志。
+
+`PrepareLock(name, redisName, cfg)` 在准备阶段复用 `redisName` 的连接池，该 Redis 实例须配置 `maxRetries: -1`。业务通过 `lockx.Named(name)` 取得执行器。
+
+例如，`redisboot.PrepareLock("jobs", "default", redislock.Config{})` 在同一个 Redis 上创建名为 `jobs` 的锁执行器，业务通过 `lockx.Named("jobs")` 使用。
 
 ## 按需接入 NATS
 
