@@ -189,13 +189,21 @@ plan := bootstrap.Plan{
         mysqlboot.PrepareMigration("orders", app.Tables(), mysqlboot.SeedOptions{}),
     },
     Services: []bootstrap.Service{
-        {Name: "http", Build: app.buildHTTP},
+        httpboot.Gin(
+            router.Register,
+            ginx.OpenAPIModule{Name: "app", Title: "App"},
+            ginx.OpenAPIModule{Name: "admin", Title: "Admin"},
+        ),
     },
 }
 return bootstrap.Run(ctx, path, plan)
 ```
 
 `Step.Init(ctx, configDir, resources)` 在资源就绪后按顺序执行。宿主可在这里迁移、加载业务配置、绑定处理函数。新增资源立即登记到栈。已有的资源初始化函数沿用 `Init(configDir, resources)` 签名，可自行设置连接超时。
+
+Gin 宿主导入 `github.com/bpcoder16/baize/bootstrap/httpboot`，通过 `router.Register(*gin.Engine)` 挂载自己的路由。Demo 在 `internal/http/router` 按端注册路由，在 `internal/http/handler` 编写处理函数和各端的 Swag 注释。将两份模板放在入口配置同目录，`gin.yaml` 控制可信代理和访问日志，`http.yaml` 控制监听地址与读写超时。[Gin 模板](conf.example/gin.yaml) · [HTTP 模板](conf.example/http.yaml)
+
+在 debug/test 模式下，宿主需提前导入生成的 Swag 文档包，每个 `--instanceName` 与模块的 `Name` 对应。`/docs` 默认展示首个模块，`/docs/<Name>` 和 `/openapi/<Name>.json` 分别提供页面和 JSON。省略模块时使用 Swag 默认实例，JSON 位于 `/openapi/doc.json`。release 模式跳过文档注册。
 
 `Service.Build(ctx, configDir)` 返回 `(apprun.Service, error)`。服务的名称以清单为准。全部构造成功后，Pixiu 并发运行服务。收到取消或任一服务退出时，先停收、排空全部服务，再逆序关闭资源和日志。服务回调支持在运行前停收，以便后续构造失败时回收。构造失败的步骤负责清理本次尚未移交的状态。
 
