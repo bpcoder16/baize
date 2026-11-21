@@ -77,6 +77,8 @@ return bootstrap.Run(ctx, path, plan)
 
 业务客户端分别位于 Pixiu 的 `infra/postgresqlx`、`infra/clickhousex`、`infra/sqlitex`。PostgreSQL 沿用 Pixiu 的 `postgresql.<实例名>.yaml`，包括证书路径及 SQL 日志默认值。PostgreSQL 和 ClickHouse 都通过 `SlaveDB(ctx)` 轮询从库，省略从库时回到主库。ClickHouse 可选择 Native 或 HTTP 协议，开启 TLS 时使用系统 CA 校验对应节点。
 
+PostgreSQL 的 `sslRootCert`、`sslCert` 和 `sslKey` 填相对文件路径时，从进程工作目录解析。例如，在 `/srv/shop` 执行 `./shop --conf /etc/shop/app.yaml`，`sslRootCert: "certs/ca.pem"` 会读取 `/srv/shop/certs/ca.pem`。证书随配置部署在 `/etc/shop/certs/` 时，可直接填写绝对路径 `/etc/shop/certs/ca.pem`。
+
 SQLite 使用 CGO 驱动，构建该入口时需要启用 CGO 并安装 C 编译器。示例用 `:memory:` 创建单连接内存库，进程退出后数据释放。需要持久化时填写文件路径或 `file:` URI，并提前创建父目录。相对路径以进程工作目录为准。
 
 ## 按需接入 Redis
@@ -171,7 +173,9 @@ return bootstrap.Run(ctx, path, plan)
 
 `disabledServices` 在构造前按类型或完整名称过滤，允许的服务类型由 `constant.IsServiceType` 定义。没有声明服务时，业务准备完成即退出。声明的服务全部禁用时，返回 `apprun.ErrNoServices` 并跳过资源初始化。
 
-`serviceShutdownTimeout` 控制全部服务共用的停收及排空时限，默认 30 秒。超时后 Pixiu 通知尚未完成的服务取消，随后开始独立计算 `resourceCloseTimeout`（默认 30 秒）。单个 NATS 客户端的 `closeTimeout` 默认 20 秒，计入资源阶段。多个 NATS 实例逐个关闭，部署时应为其他客户端和日志预留回收时间。`app.yaml` 中的两个停机超时字段均支持带单位的时间，省略或 `0s` 使用默认值，负值报错。
+`serviceShutdownTimeout` 控制全部服务共用的停收及排空时限，默认 30 秒。超时后 Pixiu 通知尚未完成的服务取消，随后开始独立计算 `resourceCloseTimeout`（默认 30 秒）。单个 NATS 客户端的 `closeTimeout` 默认 20 秒，计入资源阶段。多个 NATS 实例逐个关闭，部署时应为其他客户端和日志预留回收时间。`app.yaml` 的两个停机超时字段省略或写 `0s` 时使用默认值，负值报错。
+
+应用和实例配置中的超时建议写明单位，例如 `"30s"` 或 `"500ms"`。YAML 整数按纳秒解析，`resourceCloseTimeout: 30` 表示 30 纳秒，要设置 30 秒应写 `resourceCloseTimeout: "30s"`。
 
 `bootstrap.RunCLI(plan)` 解析命令行并接管 SIGINT、SIGTERM。宿主已有 context 时调用 `bootstrap.Run(ctx, path, plan)`。
 

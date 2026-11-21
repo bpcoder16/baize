@@ -20,6 +20,7 @@
 // 然后预检日志参数并打开日志，按清单执行准备步骤和服务，返回前关闭资源栈。
 // serviceShutdownTimeout 控制 Run 中全部服务停收和排空的总期限，省略或写 0s 使用 30 秒。
 // resourceCloseTimeout 控制资源栈回收的总期限。省略或写 0s 使用 30 秒，负值在加载时返回错误。
+// 超时建议写明单位，如 "30s" 或 "500ms"。配置中的整数按纳秒解析，30 表示 30 纳秒。
 // 只含 env 段的文件可单独解码，初始化还需要 env.appName、env.runMode、env.timeLocation 和 log.format。
 //
 // # 路径与配置兼容
