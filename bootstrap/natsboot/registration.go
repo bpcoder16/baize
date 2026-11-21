@@ -50,7 +50,7 @@ type coreConfig struct {
 	Name        string `mapstructure:"name"`
 	Subject     string `mapstructure:"subject"`
 	Queue       string `mapstructure:"queue"`
-	Subscribers int    `mapstructure:"subscribers"`
+	Subscribers *int   `mapstructure:"subscribers"`
 	Handler     string `mapstructure:"handler"`
 }
 
@@ -87,8 +87,12 @@ func (cfg *registrationConfig) bind(urlCount int, jsRegistry *natsx.JetStreamHan
 		}
 	}
 	for i, spec := range cfg.CoreConsumers {
-		if spec.Queue != "" && spec.Subscribers <= 1 {
-			return nil, fmt.Errorf("coreConsumers[%d] %q subscribers %d must be greater than 1 when queue is set", i, spec.Name, spec.Subscribers)
+		var subscribers int
+		if spec.Subscribers != nil {
+			subscribers = *spec.Subscribers
+			if spec.Queue != "" && subscribers <= 0 {
+				return nil, fmt.Errorf("coreConsumers[%d] %q subscribers %d must be positive when queue is set", i, spec.Name, subscribers)
+			}
 		}
 		handler, ok := coreHandlers[spec.Handler]
 		if !ok {
@@ -101,7 +105,7 @@ func (cfg *registrationConfig) bind(urlCount int, jsRegistry *natsx.JetStreamHan
 				spec.Name,
 				spec.Subject,
 				spec.Queue,
-				spec.Subscribers,
+				subscribers,
 				handler,
 			),
 		)

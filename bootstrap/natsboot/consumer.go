@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"github.com/bpcoder16/baize/bootstrap"
 	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
@@ -18,7 +19,7 @@ import (
 )
 
 // ConsumerService 为已声明的 NATS 实例装配 nats-consumer:<实例名> 服务。
-// Build 读取同目录的 nats-register.<实例名>.yaml 并绑定 Handler，Run 才注册订阅。
+// Build 绑定 Handler 并预检整份订阅配置，Run 按序注册 Stream、JetStream 和 Core。
 // 每个实例只声明一次。服务负责停收与排空，共享连接由 Instances 回收。
 func ConsumerService(name string, js *natsx.JetStreamHandlerRegistry, core *natsx.CoreHandlerRegistry) bootstrap.Service {
 	serviceName := constant.ServiceNATSConsumer + ":" + name
@@ -39,6 +40,9 @@ func ConsumerService(name string, js *natsx.JetStreamHandlerRegistry, core *nats
 			}
 			// 副本数的默认上限取自实例配置的地址数，避免运行时发现的节点改变策略。
 			batch, err := cfg.bind(len(client.Conn().Opts.Servers), js, core)
+			if err == nil {
+				err = natsx.ValidateRegistrations(batch.streams, batch.jetStreamConsumers, batch.coreConsumers)
+			}
 			if err != nil {
 				return apprun.Service{}, fmt.Errorf("natsboot: bind subscriptions from %q: %w", path, err)
 			}
@@ -133,7 +137,10 @@ func (c *consumerService) register() error {
 	if err := c.client.RegisterJetStreamConsumers(c.registerCtx, c.batch.jetStreamConsumers...); err != nil {
 		return fmt.Errorf("register JetStream consumers: %w", err)
 	}
-	if err := c.client.RegisterCoreConsumers(c.registerCtx, c.batch.coreConsumers...); err != nil {
+	// Core Flush 需要 deadline 才会监听取消信号，沿用 SDK 默认的 10 秒上限。
+	coreCtx, cancel := context.WithTimeout(c.registerCtx, 10*time.Second)
+	defer cancel()
+	if err := c.client.RegisterCoreConsumers(coreCtx, c.batch.coreConsumers...); err != nil {
 		return fmt.Errorf("register Core consumers: %w", err)
 	}
 	return nil

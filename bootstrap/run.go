@@ -14,6 +14,7 @@ import (
 )
 
 // Run 读取一次入口配置，执行 plan，并在返回前回收本次创建的资源。
+// Run 会设置进程级 time.Local，应在启动读取本地时间或写日志的 goroutine 之前调用。
 // 声明服务但全部被禁用时直接返回 apprun.ErrNoServices。常驻期间由 ctx 通知停机。
 func Run(ctx context.Context, path string, plan Plan) (err error) {
 	if ctx == nil {

@@ -97,7 +97,7 @@ func TestConsumerService(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
 		{"jetStreamConsumers: []", "jetstreamconsumers"},
 		{"coreConsumers: [{name: x, subject: x, handler: ping}]", "ping"},
-		{"coreConsumers: [{name: x, subject: x, queue: q, subscribers: 1, handler: Ping}]", "subscribers"},
+		{"coreConsumers: [{name: x, subject: x, queue: q, subscribers: 0, handler: Ping}]", "subscribers"},
 		{"streams: [{name: X, subjects: [x], consumers: [{durable: x, handler: Missing}]}]", "Missing"},
 		{"streams: [{name: X, mode: existing, subjects: [x]}]", "existing"},
 		{"streamDefaults: {replicas: 1}\nstreams: [{name: X, subjects: [x], replicas: 2}]", "replicas"},
@@ -106,6 +106,32 @@ func TestConsumerService(t *testing.T) {
 		if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), filename) || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("配置 %q 应报告路径及 %q，得到 %v", tc.body, tc.want, err)
 		}
+	}
+	// 后置 Consumer 的配置有误时，连前置的合法 Stream upsert 也不能执行。
+	client := natsx.Named("events")
+	cfg := natsx.DefaultStreamConfig("TEST_CHECK", 1, "test.check")
+	cfg.MaxBytes = 16384
+	stream, err := client.JetStream().CreateStream(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(filename, `streams:
+  - name: CHECK
+    mode: upsert
+    subjects: [check]
+    maxBytes: 8192
+    consumers:
+      - durable: worker
+        handler: Event
+        backOff: [1s]
+        retryDelay: 1s
+`)
+	if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "BackOff") {
+		t.Fatalf("构造时应拒绝互斥的重投配置，得到 %v", err)
+	}
+	info, err := stream.Info(t.Context())
+	if err != nil || info.Config.MaxBytes != cfg.MaxBytes {
+		t.Fatalf("预检失败后 Stream 容量应保持原值，得到 %v，错误 %v", info, err)
 	}
 	write(filename, `streams:
   - name: EVENTS
@@ -117,6 +143,7 @@ func TestConsumerService(t *testing.T) {
 coreConsumers:
   - name: ping
     subject: demo.ping
+    queue: workers
     handler: Ping
 `)
 	s, err := decl.Build(t.Context(), dir)
@@ -145,7 +172,6 @@ coreConsumers:
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	client := natsx.Named("events")
 	reply, err := client.Request(ctx, "demo.ping", nil)
 	if err != nil || string(reply.Data) != "pong" {
 		t.Fatalf("Core 请求应答失败: %v, %v", reply, err)
@@ -182,4 +208,48 @@ coreConsumers:
 	if err := client.Publish(ctx, "after.stop", nil); err != nil {
 		t.Fatalf("停收后共享客户端应仍可发布: %v", err)
 	}
+	t.Run("Core注册断连时停机", func(t *testing.T) {
+		nc, err := natsx.NewNamed(natsx.Config{Name: "stopping", URLs: []string{srv.ClientURL()}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		write("nats-register.stopping.yaml", "coreConsumers: [{name: ping, subject: p, queue: q, subscribers: 1, handler: Ping}]")
+		service, err := ConsumerService("stopping", nil, core).Build(t.Context(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn := nc.Conn()
+		reconnecting := conn.StatusChanged(nats.RECONNECTING)
+		defer conn.RemoveStatusListener(reconnecting)
+		srv.Shutdown()
+		srv.WaitForShutdown()
+		select {
+		case <-reconnecting:
+		case <-time.After(3 * time.Second):
+			t.Fatal("连接未进入重连状态")
+		}
+
+		baseline := conn.NumSubscriptions()
+		done := make(chan error, 1)
+		go func() { done <- service.Run() }()
+		defer conn.Close()
+		deadline := time.Now().Add(3 * time.Second)
+		for conn.NumSubscriptions() == baseline && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if conn.NumSubscriptions() == baseline {
+			t.Fatal("未进入 Core 注册阶段")
+		}
+		if err := service.Stop(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("停机期间注册应正常退出：%v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("停机未中断 Core 注册等待")
+		}
+	})
 }
