@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/bpcoder16/baize/bootstrap"
+	"github.com/bpcoder16/baize/bootstrap/internal/redisclient"
 	"github.com/bpcoder16/pixiu/biz/lockx"
 	"github.com/bpcoder16/pixiu/biz/lockx/redislock"
-	"github.com/bpcoder16/pixiu/infra/redisx"
 	"github.com/bpcoder16/pixiu/lifecycle"
 )
 
@@ -17,7 +17,7 @@ func PrepareLock(name, redisName string, cfg redislock.Config) bootstrap.Step {
 	return bootstrap.Step{
 		Name: "redis-" + name + "-lock",
 		Init: func(context.Context, string, *lifecycle.Stack) error {
-			client, err := lookupRedis(redisName)
+			client, err := redisclient.Lookup(redisName)
 			if err != nil {
 				return err
 			}
@@ -29,14 +29,4 @@ func PrepareLock(name, redisName string, cfg redislock.Config) bootstrap.Step {
 			return err
 		},
 	}
-}
-
-// Pixiu 的 Named 在实例缺失或已关闭时 panic，装配步骤向宿主返回启动错误。
-func lookupRedis(name string) (client *redisx.Client, err error) {
-	defer func() {
-		if cause := recover(); cause != nil {
-			err = fmt.Errorf("look up Redis %q: %v", name, cause)
-		}
-	}()
-	return redisx.Named(name), nil
 }

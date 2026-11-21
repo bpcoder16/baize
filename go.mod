@@ -7,6 +7,8 @@ require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/bpcoder16/pixiu v0.1.12
 	github.com/gin-gonic/gin v1.12.0
+	github.com/go-co-op/gocron-redis-lock/v2 v2.2.1
+	github.com/go-co-op/gocron/v2 v2.23.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/swaggo/swag v1.16.6
 	gorm.io/gorm v1.31.2
@@ -56,6 +58,7 @@ require (
 	github.com/go-playground/locales v0.14.2 // indirect
 	github.com/go-playground/universal-translator v0.18.2 // indirect
 	github.com/go-playground/validator/v10 v10.30.5 // indirect
+	github.com/go-redsync/redsync/v4 v4.18.1 // indirect
 	github.com/go-sql-driver/mysql v1.10.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/goccy/go-json v0.12.0 // indirect
@@ -69,6 +72,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.1 // indirect
@@ -85,6 +89,7 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.33 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.64.1 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.6.0 // indirect

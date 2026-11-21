@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务运行和资源回收使用 Pixiu `v0.1.12`。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。Gin HTTP 和 Cron 各有独立的服务装配入口。服务运行和资源回收使用 Pixiu `v0.1.12`。
 
 ## 初始化一个宿主
 
@@ -194,6 +194,7 @@ plan := bootstrap.Plan{
             ginx.OpenAPIModule{Name: "app", Title: "App"},
             ginx.OpenAPIModule{Name: "admin", Title: "Admin"},
         ),
+        cronboot.Service(cronrouter.Registry.Handlers()...),
     },
 }
 return bootstrap.Run(ctx, path, plan)
@@ -204,6 +205,10 @@ return bootstrap.Run(ctx, path, plan)
 Gin 宿主导入 `github.com/bpcoder16/baize/bootstrap/httpboot`，通过 `router.Register(*gin.Engine)` 挂载自己的路由。Demo 在 `internal/http/router` 按端注册路由，在 `internal/http/handler` 编写处理函数和各端的 Swag 注释。将两份模板放在入口配置同目录，`gin.yaml` 控制可信代理和访问日志，`http.yaml` 控制监听地址与读写超时。[Gin 模板](conf.example/gin.yaml) · [HTTP 模板](conf.example/http.yaml)
 
 在 debug/test 模式下，宿主需提前导入生成的 Swag 文档包，每个 `--instanceName` 与模块的 `Name` 对应。`/docs` 默认展示首个模块，`/docs/<Name>` 和 `/openapi/<Name>.json` 分别提供页面和 JSON。省略模块时使用 Swag 默认实例，JSON 位于 `/openapi/doc.json`。release 模式跳过文档注册。
+
+Cron 宿主导入 `github.com/bpcoder16/baize/bootstrap/cronboot`，通过 `cronx.MustNewHandlerRegistry` 登记签名为 `func(context.Context) error` 的包级函数。每个进程声明一个 Cron 服务，`cron.yaml` 的 `jobs` 按名称选择任务，名称区分大小写。每项可选固定间隔 `every`、六字段表达式 `cron`（从秒开始，使用应用时区）或随机间隔 `randomEvery`。固定间隔与随机下限至少为 `100ms`，随机上限须大于下限。`jobs: []` 可停用全部任务。[Cron 模板](conf.example/cron.yaml)
+
+多副本部署时，可在 `lock.redisName` 引用 `redisboot.Instances` 已声明的实例。同组副本使用相同的 Redis 数据库、`keyPrefix` 和任务名，未获锁的副本跳过本轮。开启锁时每个任务须配置正的 `timeout`，超时会取消 Handler 的 context，任务实际返回后才解锁。
 
 `Service.Build(ctx, configDir)` 返回 `(apprun.Service, error)`。服务的名称以清单为准。全部构造成功后，Pixiu 并发运行服务。收到取消或任一服务退出时，先停收、排空全部服务，再逆序关闭资源和日志。服务回调支持在运行前停收，以便后续构造失败时回收。构造失败的步骤负责清理本次尚未移交的状态。
 
