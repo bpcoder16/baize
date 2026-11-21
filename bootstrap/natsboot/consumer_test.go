@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -107,7 +108,7 @@ func TestConsumerService(t *testing.T) {
 			t.Fatalf("配置 %q 应报告路径及 %q，得到 %v", tc.body, tc.want, err)
 		}
 	}
-	// 后置 Consumer 的配置有误时，连前置的合法 Stream upsert 也不能执行。
+	// 后续声明的配置有误时，前面的合法 Stream upsert 也不能执行。
 	client := natsx.Named("events")
 	cfg := natsx.DefaultStreamConfig("TEST_CHECK", 1, "test.check")
 	cfg.MaxBytes = 16384
@@ -115,32 +116,52 @@ func TestConsumerService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	original := stream.CachedInfo().Config
 	const upsert = `streams:
   - name: CHECK
     mode: upsert
     subjects: [check]
     maxBytes: 8192
-    consumers:
+`
+	const consumer = `    consumers:
       - durable: worker
         handler: Event
         backOff: [1s, 2s]
 `
-	for _, tc := range []struct{ option, conflict string }{
-		{"retryDelay: 1s", "RetryDelay"},
-		{"maxDeliver: 1", "MaxDeliver"},
+	for _, tc := range []struct {
+		name   string
+		suffix string
+		want   []string
+	}{
+		{"RetryDelay", consumer + "        retryDelay: 1s\n", []string{"BackOff", "RetryDelay"}},
+		{"MaxDeliver", consumer + "        maxDeliver: 1\n", []string{"BackOff", "MaxDeliver"}},
+		{
+			name: "default-duplicates",
+			// 仅覆盖保留时长，沿用 DefaultStreamConfig 的 2 分钟去重窗口。
+			suffix: `  - name: SHORT
+    subjects: [short]
+    maxAge: 30s
+`,
+			want: []string{"SHORT", "duplicates", "maxAge"},
+		},
 	} {
-		t.Run(tc.conflict, func(t *testing.T) {
-			write(filename, upsert+"        "+tc.option+"\n")
+		t.Run(tc.name, func(t *testing.T) {
+			write(filename, upsert+tc.suffix)
 			_, buildErr := decl.Build(t.Context(), dir)
-			if buildErr == nil || !strings.Contains(buildErr.Error(), "BackOff") || !strings.Contains(buildErr.Error(), tc.conflict) {
-				t.Errorf("Build 应报告 BackOff 与 %s 冲突，得到 %v", tc.conflict, buildErr)
+			if buildErr == nil {
+				t.Fatal("Build 应拒绝冲突配置")
+			}
+			for _, field := range tc.want {
+				if !strings.Contains(buildErr.Error(), field) {
+					t.Errorf("Build 错误应包含 %q，得到 %v", field, buildErr)
+				}
 			}
 			info, err := stream.Info(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
-			if info.Config.MaxBytes != cfg.MaxBytes {
-				t.Errorf("预检后 Stream 的 MaxBytes = %d，期望 %d", info.Config.MaxBytes, cfg.MaxBytes)
+			if !reflect.DeepEqual(info.Config, original) {
+				t.Errorf("预检改变了已有 Stream 的配置：得到 %+v，期望 %+v", info.Config, original)
 			}
 		})
 	}

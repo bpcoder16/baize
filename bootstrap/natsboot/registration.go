@@ -189,7 +189,7 @@ func (spec streamConfig) streamRegistration(replicas int) (natsx.StreamRegistrat
 		effectiveReplicas = *spec.Replicas
 	}
 	stream := natsx.DefaultStreamConfig(spec.Name, effectiveReplicas, spec.Subjects...)
-	// 仅覆盖显式配置，保留零值语义；范围及组合约束交给服务端。
+	// 保留显式零值，整批预检使用覆盖默认值后的 Stream 配置。
 	if spec.MaxBytes != nil {
 		stream.MaxBytes = *spec.MaxBytes
 	}
