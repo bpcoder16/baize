@@ -27,7 +27,7 @@ func TestLoadIndependentConfigs(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := filepath.Join(t.TempDir(), "settings.yaml")
-	writeConfig(t, file, "env:\n  appName: cards\n  timeLocation: Unknown/Zone\nlog:\n  dir: ./logs\n  names: [http, nats]\n  hookStd: false\n  rotate:\n    every: 24h\ndisabledServices: [cron, nats-consumer:events_1-a, http, websocket]\n")
+	writeConfig(t, file, "env:\n  appName: cards\n  timeLocation: Unknown/Zone\nlog:\n  dir: ./logs\n  names: [http, nats]\n  hookStd: false\n  rotate:\n    every: 24h\ndisabledServices: [cron, nats-consumer:events_1-a, http, realtime]\n")
 	if err := os.Symlink(file, "app.yaml"); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestLoadErrors(t *testing.T) {
 		{"resourceCloseTimeout: forever", "resourceCloseTimeout"},
 		{"disabledServices: [crno]", "disabledServices[0]"},
 		{"disabledServices: [mysql]", "unknown service type"},
-		{"disabledServices: [http, 'websocket:']", "disabledServices[1]"},
+		{"disabledServices: [http, 'realtime:']", "disabledServices[1]"},
 		{"disabledServices: ['nats-consumer:a:b']", "disabledServices[0]"},
 		{"disabledServices: ['http:a*b']", "disabledServices[0]"},
 	} {

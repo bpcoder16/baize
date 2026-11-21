@@ -6,13 +6,13 @@ const (
 	ServiceHTTP         = "http"
 	ServiceCron         = "cron"
 	ServiceNATSConsumer = "nats-consumer"
-	ServiceWebSocket    = "websocket"
+	ServiceRealtime     = "realtime"
 )
 
 // IsServiceType 判断 kind 是否为 disabledServices 支持的服务类型。
 func IsServiceType(kind string) bool {
 	switch kind {
-	case ServiceHTTP, ServiceCron, ServiceNATSConsumer, ServiceWebSocket:
+	case ServiceHTTP, ServiceCron, ServiceNATSConsumer, ServiceRealtime:
 		return true
 	default:
 		return false

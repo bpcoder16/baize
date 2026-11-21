@@ -29,7 +29,7 @@
 //	mux := http.NewServeMux()
 //	mux.Handle("GET /ws", server)
 //	// 应用运行 server.Run，并由 HTTP 服务监听 mux；Ready 为 true 后接受连接。
-//	// 使用 bootstrap 时，显式将 Server 的生命周期方法填入 apprun.Service，与 HTTP 服务分别登记。
+//	// 宿主可在 Plan.Services 声明 realtimeboot.Service("app", newAppServer)，由它管理独立监听和会话。
 //
 // NewServer 调用 RegisterHandlers，在构造阶段封闭路由表。每个服务拥有独立的注册清单。
 // Handle 精确匹配 scene 和 action，注册函数应返回非法标识、空处理器或重复注册产生的错误。

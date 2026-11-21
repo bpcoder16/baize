@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务装配支持 Gin HTTP、Cron，以及按 NATS 实例声明的 Core 和 JetStream 消费者。服务运行和资源回收使用 Pixiu `v0.2.1`。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务装配支持 Realtime WebSocket、Gin HTTP、Cron，以及按 NATS 实例声明的 Core 和 JetStream 消费者。服务运行和资源回收使用 Pixiu `v0.2.1`。
 
 ## 初始化一个宿主
 
@@ -196,7 +196,9 @@ plan := bootstrap.Plan{
 
 ## Realtime 会话与推送
 
-`service/realtime` 基于 Pixiu 的 `infra/websocketx` 管理会话，按 `scene/action` 路由请求，并按用户、设备或 Topic 推送。宿主通过 `realtime.NewServer` 注入认证与路由，负责 HTTP 监听、Server 的运行和排空。[调用示例](service/realtime/doc.go)
+`service/realtime` 基于 Pixiu 的 `infra/websocketx` 管理会话，按 `scene/action` 路由请求，并按用户、设备或 Topic 推送。宿主通过 `realtime.NewServer` 注入认证与路由。将 `realtimeboot.Service("app", newAppServer)` 加入 `Plan.Services`，由白泽统一管理独立 HTTP 监听和已升级的连接。[调用示例](service/realtime/doc.go)
+
+服务启用时读取入口配置同目录的 `realtime.app.yaml`，工厂返回全新实例，登记后业务可用 `realtime.Named("app")` 推送。默认示例的升级路径为 `/ws/app`，`GET /ready/ws` 在服务就绪时返回 204。在 `disabledServices` 中填 `realtime` 可禁用整组，填 `realtime:app` 可禁用单个实例。[监听配置](conf.example/realtime.app.yaml)
 
 客户端握手时提供 `baize.realtime.v1.json` 或 `baize.realtime.v1.protobuf`。Go 宿主从 `github.com/bpcoder16/baize/service/realtime/protocol` 导入公共信封类型，Protobuf 包名为 `baize.realtime.v1`。[公共信封](service/realtime/protocol/realtime.proto)
 
