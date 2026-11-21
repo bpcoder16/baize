@@ -115,7 +115,7 @@ func TestConsumerService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filename, `streams:
+	const upsert = `streams:
   - name: CHECK
     mode: upsert
     subjects: [check]
@@ -123,15 +123,26 @@ func TestConsumerService(t *testing.T) {
     consumers:
       - durable: worker
         handler: Event
-        backOff: [1s]
-        retryDelay: 1s
-`)
-	if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "BackOff") {
-		t.Fatalf("构造时应拒绝互斥的重投配置，得到 %v", err)
-	}
-	info, err := stream.Info(t.Context())
-	if err != nil || info.Config.MaxBytes != cfg.MaxBytes {
-		t.Fatalf("预检失败后 Stream 容量应保持原值，得到 %v，错误 %v", info, err)
+        backOff: [1s, 2s]
+`
+	for _, tc := range []struct{ option, conflict string }{
+		{"retryDelay: 1s", "RetryDelay"},
+		{"maxDeliver: 1", "MaxDeliver"},
+	} {
+		t.Run(tc.conflict, func(t *testing.T) {
+			write(filename, upsert+"        "+tc.option+"\n")
+			_, buildErr := decl.Build(t.Context(), dir)
+			if buildErr == nil || !strings.Contains(buildErr.Error(), "BackOff") || !strings.Contains(buildErr.Error(), tc.conflict) {
+				t.Errorf("Build 应报告 BackOff 与 %s 冲突，得到 %v", tc.conflict, buildErr)
+			}
+			info, err := stream.Info(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Config.MaxBytes != cfg.MaxBytes {
+				t.Errorf("预检后 Stream 的 MaxBytes = %d，期望 %d", info.Config.MaxBytes, cfg.MaxBytes)
+			}
+		})
 	}
 	write(filename, `streams:
   - name: EVENTS
