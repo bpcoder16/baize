@@ -192,6 +192,12 @@ plan := bootstrap.Plan{
 
 每个 ES 管理端名称绑定配置中的一个阿里云 `instanceID`。业务可调用 `esx.Named("search-control").DescribeInstance(ctx)` 查询该实例，也可通过同一客户端管理同义词词典。索引和文档读写使用上一节的 Elasticsearch 数据客户端。
 
+## Realtime 会话与推送
+
+`service/realtime` 基于 Pixiu 的 `infra/websocketx` 管理会话，按 `scene/action` 路由请求，并按用户、设备或 Topic 推送。宿主通过 `realtime.NewServer` 注入认证与路由，负责 HTTP 监听、Server 的运行和排空。[调用示例](service/realtime/doc.go)
+
+客户端握手时提供 `baize.realtime.v1.json` 或 `baize.realtime.v1.protobuf`。Go 宿主从 `github.com/bpcoder16/baize/service/realtime/protocol` 导入公共信封类型，Protobuf 包名为 `baize.realtime.v1`。[公共信封](service/realtime/protocol/realtime.proto)
+
 ## 业务准备与常驻服务
 
 ```go
