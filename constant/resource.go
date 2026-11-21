@@ -26,3 +26,6 @@ const ResourceAliyunOSS = "aliyunossx"
 
 // ResourceAliyunSTS 沿用 Pixiu 的 STS 实例配置文件前缀。
 const ResourceAliyunSTS = "aliyunstsx"
+
+// ResourceAliyunES 沿用 Pixiu 的阿里云 Elasticsearch 管理端实例配置文件前缀。
+const ResourceAliyunES = "aliyunesx"
