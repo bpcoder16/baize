@@ -3,7 +3,8 @@
 // 将 natsboot.Instances("default", "events") 加入 bootstrap.Plan.Resources，
 // 并在入口配置同目录提供 nats.default.yaml 和 nats.events.yaml。
 // 业务可用 natsx.Named("events").Publish(ctx, subject, data) 发布 Core 消息。
-// bootstrap.Run 返回前统一排空并关闭客户端。
+// 需要订阅时，在 Plan.Services 中声明 ConsumerService("events", jsRegistry, coreRegistry)，
+// 实例名与 Instances 对应。消费服务排空后，由资源栈统一关闭客户端。
 package natsboot
 
 import (

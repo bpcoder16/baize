@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"slices"
 
 	"github.com/bpcoder16/baize/bootstrap"
 	"github.com/bpcoder16/baize/constant"
@@ -16,10 +15,13 @@ import (
 	"github.com/bpcoder16/pixiu/infra/env"
 )
 
-// Service 声明进程共用的 cron 服务。Build 从入口配置同目录读取 cron.yaml，
-// 按 jobs 的名称绑定任务。配置 lock 时借用已初始化的 Redis，首次调度从 Run 开始。
-func Service(handlers ...cronx.NamedHandler) bootstrap.Service {
-	handlers = slices.Clone(handlers)
+// Service 声明进程共用的 cron 服务，并保存注册表当前的任务清单。nil 表示无任务。
+// Build 从入口配置同目录读取 cron.yaml，按名称绑定任务，配置 lock 时借用已初始化的 Redis。
+func Service(registry *cronx.HandlerRegistry) bootstrap.Service {
+	var handlers []cronx.NamedHandler
+	if registry != nil {
+		handlers = registry.Handlers()
+	}
 	return bootstrap.Service{
 		Name: constant.ServiceCron,
 		Build: func(_ context.Context, dir string) (apprun.Service, error) {

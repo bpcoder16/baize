@@ -32,7 +32,7 @@ func writeConfig(t *testing.T, dir, name, body string) {
 func TestDisabledCron(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "app.yaml", "env: {appName: test, runMode: test, timeLocation: UTC}\nlog: {format: text}\ndisabledServices: [cron]\n")
-	plan := bootstrap.Plan{Services: []bootstrap.Service{cronboot.Service()}}
+	plan := bootstrap.Plan{Services: []bootstrap.Service{cronboot.Service(nil)}}
 	if err := bootstrap.Run(t.Context(), filepath.Join(dir, "app.yaml"), plan); !errors.Is(err, apprun.ErrNoServices) {
 		t.Fatalf("禁用 Cron 且没有 cron.yaml 时得到 %v", err)
 	}
@@ -59,10 +59,11 @@ func TestCronService(t *testing.T) {
 
 func testBinding(t *testing.T) {
 	dir := t.TempDir()
-	job := cronx.NamedHandler{Name: "Heartbeat", Handler: func(context.Context) error { return nil }}
-	handlers := []cronx.NamedHandler{job}
-	decl := cronboot.Service(handlers...)
-	handlers[0].Name = "changed"
+	registry := cronx.MustNewHandlerRegistry()
+	handler := func(context.Context) error { return nil }
+	registry.MustRegister(handler, "Heartbeat")
+	decl := cronboot.Service(registry)
+	registry.MustRegister(handler, "Late")
 	if decl.Name != "cron" {
 		t.Fatal(decl.Name)
 	}
@@ -72,6 +73,7 @@ func testBinding(t *testing.T) {
 	for _, body := range []string{
 		"jobz: []",
 		"jobs: [{name: heartbeat, every: 1s}]",
+		"jobs: [{name: Late, every: 1s}]",
 		"jobs: [{name: Heartbeat, every: 1s}, {name: Heartbeat, every: 2s}]",
 		"jobs: [{name: Heartbeat, every: 0s, cron: '* * * * * *'}]",
 		"jobs: [{name: Heartbeat, randomEvery: {min: 1s, max: 500ms}}]",
@@ -85,20 +87,22 @@ func testBinding(t *testing.T) {
 			t.Fatalf("配置 %s 得到 %v", body, err)
 		}
 	}
-	writeConfig(t, dir, "cron.yaml", "jobs: []")
-	for _, invalid := range [][]cronx.NamedHandler{{job, job}, {{Name: "empty"}}, {{Name: " space", Handler: job.Handler}}} {
-		if _, err := cronboot.Service(invalid...).Build(t.Context(), dir); err == nil {
-			t.Fatal("接受了非法 Handler 声明")
-		}
+	writeConfig(t, dir, "cron.yaml", "jobs: [{name: Heartbeat, every: 1s}]")
+	if _, err := cronboot.Service(nil).Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "unknown handler") {
+		t.Fatalf("空注册表绑定已配置任务时得到 %v", err)
 	}
-	for _, body := range []string{
-		"jobs: []",
-		"jobs: [{name: Heartbeat, every: 1m, successLevel: info}]",
-		"jobs: [{name: Heartbeat, cron: '0 * * * * *'}]",
-		"jobs: [{name: Heartbeat, randomEvery: {min: 1s, max: 2s}, successLevel: debug}]",
+	for _, tc := range []struct {
+		body string
+		decl bootstrap.Service
+	}{
+		{"jobs: []", cronboot.Service(nil)},
+		{"jobs: []", decl},
+		{"jobs: [{name: Heartbeat, every: 1m, successLevel: info}]", decl},
+		{"jobs: [{name: Heartbeat, cron: '0 * * * * *'}]", decl},
+		{"jobs: [{name: Heartbeat, randomEvery: {min: 1s, max: 2s}, successLevel: debug}]", decl},
 	} {
-		writeConfig(t, dir, "cron.yaml", body)
-		s, err := decl.Build(t.Context(), dir)
+		writeConfig(t, dir, "cron.yaml", tc.body)
+		s, err := tc.decl.Build(t.Context(), dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,14 +131,16 @@ func testLockAndDrain(t *testing.T) {
 	const key = "test:Heartbeat"
 	entered := make(chan context.Context, 1)
 	release := make(chan struct{})
-	decl := cronboot.Service(cronx.NamedHandler{Name: "Heartbeat", Handler: func(ctx context.Context) error {
+	registry := cronx.MustNewHandlerRegistry()
+	registry.MustRegister(func(ctx context.Context) error {
 		entered <- ctx
 		select {
 		case <-release:
 		case <-ctx.Done():
 		}
 		return ctx.Err()
-	}})
+	}, "Heartbeat")
+	decl := cronboot.Service(registry)
 	writeConfig(t, dir, "cron.yaml", lock+"jobs: [{name: Heartbeat, every: 100ms}]")
 	if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("带锁任务缺少 timeout 时得到 %v", err)

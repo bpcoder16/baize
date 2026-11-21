@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。Gin HTTP 和 Cron 各有独立的服务装配入口。服务运行和资源回收使用 Pixiu `v0.1.12`。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务装配支持 Gin HTTP、Cron，以及按 NATS 实例声明的 Core 和 JetStream 消费者。服务运行和资源回收使用 Pixiu `v0.1.12`。
 
 ## 初始化一个宿主
 
@@ -134,6 +134,20 @@ return client.Publish(ctx, "orders.created", data)
 
 Core NATS 和 JetStream 共用该连接。向已有 Stream 发布并等待服务端确认时可用 `client.PublishJetStream(ctx, subject, data, messageID)`。客户端初始化只建立连接并创建 JetStream 上下文，使用 JetStream 发布时需要服务端启用 JetStream 并配置匹配主题的 Stream。客户端在资源栈关闭时统一排空。
 
+需要消费消息时，在 `Plan.Services` 中声明对应实例的服务。参数顺序与 Biucards 一致，分别是实例名、JetStream 注册表和 Core 注册表。每类可传 `nil` 表示无 Handler。
+
+```go
+natsboot.ConsumerService(
+    "default",
+    natsrouter.JetStreamRegistry,
+    natsrouter.CoreRegistry,
+)
+```
+
+每个实例只声明一个消费服务。`Build` 严格读取入口配置同目录的 `nats-register.<实例名>.yaml`，将 `streams[].consumers[].handler` 和 `coreConsumers[].handler` 分别绑定到对应注册表。注册名区分大小写，`Run` 启动订阅。Stream 支持 `create`、`upsert`、`existing`，Durable 可独立选择 `create` 或 `upsert`。命名空间和日志名取自连接配置。[订阅配置模板](conf.example/nats-register.default.yaml)
+
+在 `disabledServices` 加入 `"nats-consumer:default"` 可跳过该实例的消费装配，加入 `"nats-consumer"` 可禁用全部消费者。发布方仍可使用已声明的客户端。停机时先停收并排空在途消息，再由资源栈关闭连接。
+
 ## 按需接入 Elasticsearch
 
 按集群主版本导入 `bootstrap/elasticsearchboot/v7`、`v8` 或 `v9`。例如，连接 Elasticsearch 8 时，入口只需导入对应的装配包：
@@ -194,7 +208,7 @@ plan := bootstrap.Plan{
             ginx.OpenAPIModule{Name: "app", Title: "App"},
             ginx.OpenAPIModule{Name: "admin", Title: "Admin"},
         ),
-        cronboot.Service(cronrouter.Registry.Handlers()...),
+        cronboot.Service(cronrouter.Registry),
     },
 }
 return bootstrap.Run(ctx, path, plan)

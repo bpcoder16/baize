@@ -2,7 +2,6 @@ package cronboot
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bpcoder16/pixiu/infra/cronx"
@@ -28,12 +27,6 @@ type jobConfig struct {
 func (cfg *fileConfig) bind(handlers []cronx.NamedHandler) ([]cronx.Job, error) {
 	byName := make(map[string]cronx.Handler, len(handlers))
 	for _, h := range handlers {
-		if h.Name == "" || strings.TrimSpace(h.Name) != h.Name || h.Handler == nil {
-			return nil, fmt.Errorf("invalid handler %q", h.Name)
-		}
-		if _, exists := byName[h.Name]; exists {
-			return nil, fmt.Errorf("duplicate handler %q", h.Name)
-		}
 		byName[h.Name] = h.Handler
 	}
 	jobs := make([]cronx.Job, 0, len(cfg.Jobs))
