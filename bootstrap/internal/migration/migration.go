@@ -22,9 +22,25 @@ type SeedOptions struct {
 	Seeds []schemamigrate.Seed // 按清单顺序校准。
 }
 
-type fileConfig struct {
+type Config struct {
 	Enabled bool          `mapstructure:"enabled"`
 	Timeout time.Duration `mapstructure:"timeout"`
+}
+
+// LoadConfig 读取命名实例的迁移策略，超时默认五分钟。
+func LoadConfig(dir, kind, name string) (Config, error) {
+	path := filepath.Join(dir, kind+"-migrate."+name+".yaml")
+	cfg, err := configx.Parse[Config](path)
+	if err != nil {
+		return Config{}, fmt.Errorf("load %q: %w", path, err)
+	}
+	if cfg.Timeout < 0 {
+		return Config{}, fmt.Errorf("migration timeout in %q must be non-negative", path)
+	}
+	if cfg.Timeout == 0 {
+		cfg.Timeout = 5 * time.Minute
+	}
+	return *cfg, nil
 }
 
 type masterClient interface {
@@ -34,24 +50,17 @@ type masterClient interface {
 // Prepare 按数据库类型和实例名读取开关，启用后借用现有主库。
 func Prepare[T masterClient](kind, name string, tables []schemamigrate.Table, seeds SeedOptions, named func(string) T) bootstrap.Step {
 	return bootstrap.Step{
-		Name: kind + "-" + name + "-migrate",
+		Name: "baize." + kind + "-" + name + "-migrate",
 		Init: func(ctx context.Context, dir string, _ *lifecycle.Stack) error {
 			if !instancekey.Valid(name) {
 				return fmt.Errorf("invalid %s migration instance name %q", kind, name)
 			}
-			path := filepath.Join(dir, kind+"-migrate."+name+".yaml")
-			cfg, err := configx.Parse[fileConfig](path)
+			cfg, err := LoadConfig(dir, kind, name)
 			if err != nil {
-				return fmt.Errorf("load %q: %w", path, err)
-			}
-			if cfg.Timeout < 0 {
-				return fmt.Errorf("migration timeout in %q must be non-negative", path)
+				return err
 			}
 			if !cfg.Enabled || (len(tables) == 0 && len(seeds.Seeds) == 0) {
 				return nil
-			}
-			if cfg.Timeout == 0 {
-				cfg.Timeout = 5 * time.Minute
 			}
 			// 两个阶段共用实例的截止时间，种子只使用迁表后剩余的时间。
 			ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
@@ -59,7 +68,7 @@ func Prepare[T masterClient](kind, name string, tables []schemamigrate.Table, se
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
 			}
-			client, err := lookup(kind, name, named)
+			client, err := instancekey.Lookup(kind, name, named)
 			if err != nil {
 				return err
 			}
@@ -76,14 +85,4 @@ func Prepare[T masterClient](kind, name string, tables []schemamigrate.Table, se
 			return schemamigrate.ApplySeeds(ctx, client.MasterDB, seeds.Files, seeds.Seeds)
 		},
 	}
-}
-
-// Pixiu 的 Named 在实例缺失或已关闭时 panic，仅将查找失败转换为启动错误。
-func lookup[T masterClient](kind, name string, named func(string) T) (client T, err error) {
-	defer func() {
-		if cause := recover(); cause != nil {
-			err = fmt.Errorf("look up %s %q: %v", kind, name, cause)
-		}
-	}()
-	return named(name), nil
 }

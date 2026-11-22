@@ -55,5 +55,5 @@ func NamedInstances[F any](kind string, names []string, open func(string, *F) er
 		}
 		return nil
 	}
-	return Resource{Name: kind, Init: initGroup}
+	return Resource{Name: kind, Init: initGroup, instances: names}
 }

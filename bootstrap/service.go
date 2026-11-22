@@ -15,10 +15,33 @@ import (
 
 // Service 是常驻服务的延迟声明。Name 为类型或 类型:实例名，用于配置过滤和运行标识。
 // Build 在启用时才调用，成功返回完整的服务回调，失败须自行回收本次部分构造的状态。
+// 两个 Prepare 钩子均可省略。各阶段按启用服务的声明顺序执行，成功时返回传入的 ctx 或其派生上下文，失败时返回的错误会终止启动。
 // 回调须支持尚未 Run 就停收。Build 使用的 ctx 只用于构造，运行期由 Stop、Wait 和 Cancel 管理。
 type Service struct {
-	Name  string
-	Build func(ctx context.Context, configDir string) (apprun.Service, error)
+	Name string
+	// BeforePrepare 在共享资源就绪后、首个 Prepare 步骤之前调用，可为后续步骤提供装配状态。
+	BeforePrepare func(context.Context) (context.Context, error)
+	// AfterPrepare 在全部 Prepare 成功后、首个服务 Build 之前调用，可读取各步骤的装配结果。
+	AfterPrepare func(context.Context) (context.Context, error)
+	Build        func(ctx context.Context, configDir string) (apprun.Service, error)
+}
+
+// 在相同的取消和错误处理规则下调用前后钩子，仅成功时将新上下文传给下一步。
+func runPrepareHook(ctx context.Context, name, phase string, hook func(context.Context) (context.Context, error)) (context.Context, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if hook == nil {
+		return ctx, nil
+	}
+	next, err := hook(ctx)
+	if next == nil && err == nil {
+		err = apprun.ErrNilContext
+	}
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: service %q %s: %w", name, phase, err)
+	}
+	return next, nil
 }
 
 func validateServices(services []Service) error {

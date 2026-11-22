@@ -16,8 +16,8 @@ func TestSameNameMigrationSteps(t *testing.T) {
 	tables := []schemamigrate.Table{{}}
 	mysql := mysqlboot.PrepareMigration("default", tables, mysqlboot.SeedOptions{})
 	pg := postgresqlboot.PrepareMigration("default", tables, postgresqlboot.SeedOptions{})
-	if mysql.Name == pg.Name {
-		t.Fatal("两种数据库使用同一实例名时，步骤名应独立")
+	if mysql.Name != "baize.mysql-default-migrate" || pg.Name != "baize.postgresql-default-migrate" {
+		t.Fatalf("迁移步骤名错误：MySQL %q，PostgreSQL %q", mysql.Name, pg.Name)
 	}
 	dir := t.TempDir()
 	for _, kind := range []string{"mysql", "postgresql"} {

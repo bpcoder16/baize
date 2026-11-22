@@ -21,7 +21,7 @@ import (
 func TestRunPlan(t *testing.T) {
 	mode := os.Getenv("BAIZE_TEST_PLAN")
 	if mode == "" {
-		for _, mode := range []string{"once", "disabled", "serve", "cancel-resource-group", "prepare-error", "build-error", "invalid-service", "unexpected-exit", "timeout"} {
+		for _, mode := range []string{"once", "disabled", "serve", "cancel-resource-group", "cancel-prepare", "before-error", "after-error", "after-nil", "prepare-error", "build-error", "invalid-service", "unexpected-exit", "timeout"} {
 			t.Run(mode, func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
 				defer cancel()
@@ -56,9 +56,29 @@ func TestRunPlan(t *testing.T) {
 	failure := errors.New("test failure")
 	closeFailure := errors.New("test close failure")
 	stopped := make(chan struct{})
-	service := bootstrap.Service{Name: "nats-consumer:on", Build: func(_ context.Context, configDir string) (apprun.Service, error) {
+	type hookKey struct{}
+	hook := func(stage string) func(context.Context) (context.Context, error) {
+		return func(ctx context.Context) (context.Context, error) {
+			record(stage)
+			if mode == stage+"-error" {
+				return nil, failure
+			}
+			if mode == "after-nil" && stage == "after" {
+				return nil, nil
+			}
+			return context.WithValue(ctx, hookKey{}, stage), nil
+		}
+	}
+	service := bootstrap.Service{Name: "nats-consumer:on", Build: func(ctx context.Context, configDir string) (apprun.Service, error) {
 		if configDir != dir {
 			t.Fatal(configDir)
+		}
+		wantStage := "after"
+		if mode == "build-error" {
+			wantStage = "after cron"
+		}
+		if got := ctx.Value(hookKey{}); got != wantStage {
+			t.Fatalf("Build context stage = %v, want %s", got, wantStage)
 		}
 		record("build")
 		s := apprun.Service{
@@ -94,6 +114,8 @@ func TestRunPlan(t *testing.T) {
 		}
 		return s, nil
 	}}
+	service.BeforePrepare = hook("before")
+	service.AfterPrepare = hook("after")
 	disabled := func(context.Context, string) (apprun.Service, error) {
 		t.Fatal("构造了已禁用服务")
 		return apprun.Service{}, nil
@@ -112,20 +134,42 @@ func TestRunPlan(t *testing.T) {
 				return nil
 			})
 		}}},
-		Prepare: []bootstrap.Step{{Name: "migrate", Init: func(_ context.Context, _ string, _ *lifecycle.Stack) error {
+		Prepare: []bootstrap.Step{{Name: "migrate", Init: func(ctx context.Context, _ string, _ *lifecycle.Stack) error {
+			if mode != "once" {
+				wantStage := "before"
+				if mode == "build-error" {
+					wantStage = "before cron"
+				}
+				if got := ctx.Value(hookKey{}); got != wantStage {
+					t.Fatalf("Prepare context stage = %v, want %s", got, wantStage)
+				}
+			}
 			record("prepare")
+			if mode == "cancel-prepare" {
+				cancel()
+			}
 			if mode == "prepare-error" {
 				return failure
 			}
 			return nil
 		}}},
-		Services: []bootstrap.Service{{Name: "http:admin", Build: disabled}, {Name: "nats-consumer:off", Build: disabled}, service},
+		Services: []bootstrap.Service{
+			{
+				Name:          "http:admin",
+				BeforePrepare: hook("disabled before"),
+				AfterPrepare:  hook("disabled after"),
+				Build:         disabled,
+			},
+			{Name: "nats-consumer:off", Build: disabled},
+			service,
+		},
 	}
 	var wantErr error
-	want := []string{"resource", "prepare"}
+	want := []string{"resource", "before", "prepare", "after"}
 	switch mode {
 	case "once":
 		plan.Services = nil
+		want = []string{"resource", "prepare"}
 	case "disabled":
 		plan.Services = plan.Services[:2]
 		wantErr = apprun.ErrNoServices
@@ -153,14 +197,41 @@ func TestRunPlan(t *testing.T) {
 		})
 		wantErr = context.Canceled
 		want = []string{"resource", "open orders", "open audit", "close sample"}
+	case "before-error", "after-error", "after-nil":
+		plan.Services = append(plan.Services, bootstrap.Service{
+			Name: "cron",
+			BeforePrepare: func(ctx context.Context) (context.Context, error) {
+				record("before cron")
+				return ctx, nil
+			},
+			AfterPrepare: hook("after cron"),
+			Build:        disabled,
+		})
+		wantErr = failure
+		want = []string{"resource", "before"}
+		if mode != "before-error" {
+			want = append(want, "before cron", "prepare", "after")
+		}
+		if mode == "after-nil" {
+			wantErr = apprun.ErrNilContext
+		}
+	case "cancel-prepare":
+		wantErr = context.Canceled
+		want = []string{"resource", "before", "prepare"}
 	case "prepare-error":
 		wantErr = failure
+		want = []string{"resource", "before", "prepare"}
 	case "build-error":
-		plan.Services = append(plan.Services, bootstrap.Service{Name: "cron", Build: func(context.Context, string) (apprun.Service, error) {
-			return apprun.Service{}, failure
-		}})
+		plan.Services = append(plan.Services, bootstrap.Service{
+			Name:          "cron",
+			BeforePrepare: hook("before cron"),
+			AfterPrepare:  hook("after cron"),
+			Build: func(context.Context, string) (apprun.Service, error) {
+				return apprun.Service{}, failure
+			},
+		})
 		wantErr = failure
-		want = append(want, "build", "stop", "wait")
+		want = []string{"resource", "before", "before cron", "prepare", "after", "after cron", "build", "stop", "wait"}
 	case "invalid-service":
 		wantErr = apprun.ErrInvalidService
 		want = append(want, "build", "stop", "wait")
@@ -180,6 +251,15 @@ func TestRunPlan(t *testing.T) {
 	err := bootstrap.Run(ctx, path, plan)
 	if mode == "build-error" && (!errors.Is(err, closeFailure) || !strings.Contains(err.Error(), "cron")) {
 		t.Fatalf("构造错误缺少步骤名或回收错误: %v", err)
+	}
+	if mode == "before-error" || mode == "after-error" || mode == "after-nil" {
+		phase := "AfterPrepare"
+		if mode == "before-error" {
+			phase = "BeforePrepare"
+		}
+		if err == nil || !strings.Contains(err.Error(), phase) || !strings.Contains(err.Error(), service.Name) {
+			t.Fatalf("钩子错误应包含服务名和阶段: %v", err)
+		}
 	}
 	if !errors.Is(err, wantErr) || errors.Is(err, lifecycle.ErrCloseTimeout) {
 		t.Fatalf("Run = %v, want %v", err, wantErr)

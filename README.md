@@ -15,7 +15,7 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务装配支持 Realtime WebSocket、Gin HTTP、Cron，以及按 NATS 实例声明的 Core 和 JetStream 消费者。服务运行和资源回收使用 Pixiu `v0.2.4`。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务装配支持 Realtime WebSocket、Gin HTTP、Cron，以及按 NATS 实例声明的 Core 和 JetStream 消费者。JetStream Outbox 的事务登记、投递与补偿由 Baize 提供。
 
 ## 初始化一个宿主
 
@@ -224,6 +224,10 @@ plan := bootstrap.Plan{
 return bootstrap.Run(ctx, path, plan)
 ```
 
+Baize 内置准备步骤的 `Step.Name` 统一使用 `baize.` 前缀，例如 `baize.mysql-default-migrate` 和 `baize.jetstream-outbox`。
+
+资源就绪后，先按声明顺序调用所有启用服务的 `BeforePrepare`，再依次执行 `Plan.Prepare`。全部步骤成功后，按相同的服务顺序调用 `AfterPrepare`，然后开始 `Build`。两个钩子均可省略，签名为 `func(context.Context) (context.Context, error)`。成功时将非空上下文传给后续钩子和阶段。任一钩子返回错误时立即停止启动，回收已登记的资源。返回的错误包含服务名和钩子名，调用方可用 `errors.Is` 或 `errors.As` 检查原始错误。Cron 通过 `BeforePrepare` 提供内置任务的登记入口。
+
 `Step.Init(ctx, configDir, resources)` 在资源就绪后按顺序执行。宿主可在这里迁移、加载业务配置、绑定处理函数。新增资源立即登记到栈。已有的资源初始化函数沿用 `Init(configDir, resources)` 签名，可自行设置连接超时。
 
 Gin 宿主导入 `github.com/bpcoder16/baize/bootstrap/httpboot`，通过 `router.Register(*gin.Engine)` 挂载自己的路由。Demo 在 `internal/http/router` 按端注册路由，在 `internal/http/handler` 编写处理函数和各端的 Swag 注释。将两份模板放在入口配置同目录，`gin.yaml` 控制可信代理和访问日志，`http.yaml` 控制监听地址与读写超时。[Gin 模板](conf.example/gin.yaml) · [HTTP 模板](conf.example/http.yaml)
@@ -246,15 +250,47 @@ Cron 宿主导入 `github.com/bpcoder16/baize/bootstrap/cronboot`，通过 `cron
 
 ## 目标目录
 
-目录沿用业务项目的职责分层。以 Outbox 为例，表模型放在 `model/entity/outbox/`，事务登记和状态回写放在 `repository/outbox/`，投递与补偿流程放在 `service/outbox/`，JetStream 发布和 Cron 入口分别放在 `natspublisher/`、`cronhandler/`。宿主可以按需导入各层的公开包。
+通用业务按调用方、业务流程和持久化分层。宿主在启动时导入对应的 Boot 包，处理业务时调用 Service。
 
-`bootstrap/` 负责应用装配。需要装配的业务能力在这里提供统一入口，把分散在各层的实现接到宿主已有的表迁移、路由、任务和订阅清单。实际用到哪一层，就在哪一层下沉代码。
+| 目录 | Outbox 中的职责 |
+| --- | --- |
+| `constant/`、`error/outbox/` | 定义数据库方言、发布类型、投递状态和共享错误。 |
+| `model/entity/<数据库>/outbox/` | 分别定义 MySQL 和 PostgreSQL 的表结构与索引。 |
+| `model/outbox/` | 定义事务任务、记录、投递快照及 JetStream 消息正文。 |
+| `repository/outbox/` | 选择实体、迁表、事务插入、按类型扫描和清理、持锁读取与回写。各业务仓储可复用 `repository/internal/dbinit` 的会话校验和命名迁移锁。 |
+| `service/outbox/` | 提供业务入口，按类型登记 Worker，执行投递与补偿。 |
+| `service/outbox/nats/` | 按实例发布至 JetStream，以有效 PubAck 确认发送成功。 |
+| `bootstrap/outboxboot/` | 借用命名资源，初始化仓储和 Worker，将按类型执行的补偿任务接入宿主 Cron。 |
 
-## 后续的 Outbox 接入设计
+## JetStream Outbox
 
-1. 在宿主启动清单中选择共享实例和业务能力，并登记项目自己的处理函数。例如，已有 MySQL 和 NATS 的应用只需增加一项 Outbox 声明，引用已有实例。
-2. 在宿主配置中指定部署行为。Outbox 的表随宿主迁移策略准备，补偿任务通过 `cron.yaml` 启用。需要消费事件的应用在自己的 `nats-register.<实例名>.yaml` 中绑定主题、durable 和处理函数。
-3. 在业务事务中使用白泽的 Service。例如，更新支付单时用同一个事务登记支付成功事件，提交后由 Outbox 投递。收到事件后发货或开通会员权益，分别由商城和会员系统处理。
+在 `Plan.Prepare` 中声明主库、发布实例和补偿调度。以下配置每 10 秒触发一次，每轮最多运行 1 分钟。数据库也可选 `constant.PostgreSQL`。
+
+```go
+outboxboot.PrepareJetStream(outboxboot.JetStreamConfig{
+    Backend:         constant.MySQL,
+    DatabaseName:    "default",
+    ResourceNames:   []string{"events", "audit"},
+    CronTaskEvery:   10 * time.Second,
+    CronTaskTimeout: time.Minute,
+})
+```
+
+所选实例须开启迁移，宿主须启用 Cron。Prepare 验证名单内的 NATS 实例可访问 JetStream，随后在数据库会话锁内迁移 `baize_outbox`，并登记 `nats_jetstream` Worker。同进程每种 Handler 类型最多登记一个 Worker。同库同 schema 的 Worker 可以共用该表，共用同一张表和类型的副本配置相同的发布名单。
+
+滚动新增发布目标时，先将目标追加到所有投递副本的名单，全部生效后再向它登记任务。下线目标时，先让所有生产端停止向它登记（包括通过名单首项选取默认目标的调用），待在途业务事务结束、该目标的 `pending` 数量归零后，再从各副本移除。副本遇到名单外的目标会将任务标为 `failed`。
+
+在写业务数据的同一个事务里调用 `outbox.EnqueueJetStreamTx(tx, outbox.JetStreamMessage{...})`。事务须从所选主库的同一个连接池开启，并使用配置的数据库和 schema。传入同方言的其他连接池返回 `ErrInvalidSession`。消息要求合法的 `Subject`、显式的 `Data` 和 `Header`，以及非零的 `ExpiresAt`。允许空数据和空 Header。Header 名须为合法 HTTP token，例如 `X-Trace-ID`，非法名称在入队时返回 `ErrInvalidArgument`。`ResourceName` 省略时使用名单首项。实际目标名称及 `handler_type=nats_jetstream` 随任务一起入库。
+
+最外层业务事务提交后，可调用 `outbox.SendJetStream(ctx, id)` 或 `outbox.SendAsyncJetStream(id)`。通用入口 `outbox.Send(ctx, handlerType, id)` 和 `outbox.SendAsync(handlerType, id)` 接收显式类型。重试沿用任务 ID 作为 `Nats-Msg-Id`，消费端仍需幂等。
+
+补偿任务 `baize.outbox.retry.nats_jetstream` 每页扫描 200 条该类型的待发记录。每次扫描先固定最大待发 ID。整轮超时后，同一 Worker 下次从最后尝试的 ID 之后继续。扫完上界后再从头重试，期间新增的任务也在下一遍处理。进度保存在 Worker 内存中，进程重启后从头扫描。多副本共用 Cron 的锁配置与任务名。
+
+临时发布错误留在 `pending`，过期或目标已移出名单的任务进入 `failed`。清理窗口内只清理该类型的终态。指定类型未登记时，同步入口返回 `ErrHandlerNotRegistered`，异步入口在调用方 panic。任务类型与 Worker 绑定的类型不一致时，发送返回或记录 `ErrHandlerTypeMismatch`，任务保持原状。
+
+单次发送的加锁、发布和回写共用一个 context。提交前取消时事务回滚并释放行锁，任务保留上次提交的状态、尝试次数和错误原因，后续补偿可以重试。
+
+数据库集成测试通过 `BAIZE_OUTBOX_MYSQL_DSN` 和 `BAIZE_OUTBOX_POSTGRESQL_DSN` 连接测试实例。设置后，在仓库根目录运行 `go test ./...`。
 
 ## 许可证
 

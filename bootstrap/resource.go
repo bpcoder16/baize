@@ -10,8 +10,9 @@ import (
 // Resource 是日志就绪后执行的资源初始化步骤。Init 接收入口配置所在目录，
 // 每取得一项资源就把关闭函数登记到同一栈，供退出或后续初始化失败时逆序回收。
 type Resource struct {
-	Name string
-	Init func(configDir string, resources *lifecycle.Stack) error
+	instances []string
+	Name      string
+	Init      func(configDir string, resources *lifecycle.Stack) error
 }
 
 func validateResources(resources []Resource) error {

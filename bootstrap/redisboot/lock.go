@@ -5,9 +5,10 @@ import (
 	"fmt"
 
 	"github.com/bpcoder16/baize/bootstrap"
-	"github.com/bpcoder16/baize/bootstrap/internal/redisclient"
+	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
 	"github.com/bpcoder16/pixiu/biz/lockx"
 	"github.com/bpcoder16/pixiu/biz/lockx/redislock"
+	"github.com/bpcoder16/pixiu/infra/redisx"
 	"github.com/bpcoder16/pixiu/lifecycle"
 )
 
@@ -15,9 +16,9 @@ import (
 // redisName 对应 Instances 中的名称，该客户端须配置 maxRetries: -1。
 func PrepareLock(name, redisName string, cfg redislock.Config) bootstrap.Step {
 	return bootstrap.Step{
-		Name: "redis-" + name + "-lock",
+		Name: "baize.redis-" + name + "-lock",
 		Init: func(context.Context, string, *lifecycle.Stack) error {
-			client, err := redisclient.Lookup(redisName)
+			client, err := instancekey.Lookup("Redis", redisName, redisx.Named)
 			if err != nil {
 				return err
 			}

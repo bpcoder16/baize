@@ -61,8 +61,21 @@ func Run(ctx context.Context, path string, plan Plan) (err error) {
 	if err = initResources(ctx, dir, plan.Resources, resources); err != nil {
 		return err
 	}
+	ctx = context.WithValue(ctx, instancesKey{}, plan.Resources)
+	for _, service := range services {
+		ctx, err = runPrepareHook(ctx, service.Name, "BeforePrepare", service.BeforePrepare)
+		if err != nil {
+			return err
+		}
+	}
 	if err = runPrepare(ctx, dir, plan.Prepare, resources); err != nil {
 		return err
+	}
+	for _, service := range services {
+		ctx, err = runPrepareHook(ctx, service.Name, "AfterPrepare", service.AfterPrepare)
+		if err != nil {
+			return err
+		}
 	}
 	if err = ctx.Err(); err != nil {
 		return err

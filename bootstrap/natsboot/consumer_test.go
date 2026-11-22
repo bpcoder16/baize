@@ -71,7 +71,7 @@ func TestConsumerService(t *testing.T) {
 	}
 	const filename = "nats-register.events.yaml"
 	write(filename, "{}")
-	if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "events") {
+	if _, err := decl.Build(t.Context(), dir); err == nil || err.Error() != `natsboot: look up NATS "events": natsx: client "events" is not registered` {
 		t.Fatalf("缺少共享客户端时应报告对应实例，得到 %v", err)
 	}
 	srv, err := server.NewServer(&server.Options{

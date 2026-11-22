@@ -5,7 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bpcoder16/baize/bootstrap/internal/redisclient"
+	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
+	"github.com/bpcoder16/pixiu/infra/redisx"
 	redislock "github.com/go-co-op/gocron-redis-lock/v2"
 	"github.com/go-co-op/gocron/v2"
 )
@@ -36,7 +37,7 @@ func (cfg lockConfig) locker() (gocron.Locker, error) {
 	if cfg.RenewInterval <= 0 || cfg.RenewInterval >= cfg.TTL {
 		return nil, errors.New("renewInterval must be positive and less than ttl")
 	}
-	client, err := redisclient.Lookup(cfg.RedisName)
+	client, err := instancekey.Lookup("Redis", cfg.RedisName, redisx.Named)
 	if err != nil {
 		return nil, err
 	}

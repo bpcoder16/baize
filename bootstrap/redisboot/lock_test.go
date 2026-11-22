@@ -33,10 +33,10 @@ func TestPrepareLock(t *testing.T) {
 	cfg := redislock.Config{TTL: 12 * time.Second}
 	step := PrepareLock("orders", "jobs", cfg)
 	named := PrepareLock("default", "jobs", cfg)
-	if step.Name != "redis-orders-lock" || named.Name != "redis-default-lock" {
+	if step.Name != "baize.redis-orders-lock" || named.Name != "baize.redis-default-lock" {
 		t.Fatalf("步骤名应由执行器名称生成，实际为 %q 和 %q", step.Name, named.Name)
 	}
-	if err := step.Init(t.Context(), dir, &resources); err == nil || !strings.Contains(err.Error(), "jobs") {
+	if err := step.Init(t.Context(), dir, &resources); err == nil || err.Error() != `look up Redis "jobs": redisx: client "jobs" is not registered` {
 		t.Fatalf("缺少 Redis 实例时应报告实例名，实际为 %v", err)
 	}
 

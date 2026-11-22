@@ -24,13 +24,20 @@ func Service(registry *cronx.HandlerRegistry) bootstrap.Service {
 	}
 	return bootstrap.Service{
 		Name: constant.ServiceCron,
-		Build: func(_ context.Context, dir string) (apprun.Service, error) {
-			return build(dir, handlers)
+		BeforePrepare: func(ctx context.Context) (context.Context, error) {
+			return context.WithValue(ctx, jobsKey{}, &preparedJobs{handlers: handlers}), nil
+		},
+		Build: func(ctx context.Context, dir string) (apprun.Service, error) {
+			var extra []cronx.Job
+			if state, ok := ctx.Value(jobsKey{}).(*preparedJobs); ok {
+				extra = state.jobs
+			}
+			return build(dir, handlers, extra)
 		},
 	}
 }
 
-func build(dir string, handlers []cronx.NamedHandler) (apprun.Service, error) {
+func build(dir string, handlers []cronx.NamedHandler, extra []cronx.Job) (apprun.Service, error) {
 	path := filepath.Join(dir, "cron.yaml")
 	cfg, err := configx.Parse[fileConfig](path)
 	if err != nil {
@@ -40,6 +47,7 @@ func build(dir string, handlers []cronx.NamedHandler) (apprun.Service, error) {
 	if err != nil {
 		return apprun.Service{}, fmt.Errorf("cronboot: bind jobs from %q: %w", path, err)
 	}
+	jobs = append(jobs, extra...)
 	options := cronx.Config{
 		Location:   env.TimeLocation(),
 		LoggerName: cfg.LoggerName,

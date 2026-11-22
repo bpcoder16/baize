@@ -34,9 +34,9 @@ func ConsumerService(name string, js *natsx.JetStreamHandlerRegistry, core *nats
 			if err != nil {
 				return apprun.Service{}, err
 			}
-			client, err := lookupClient(name)
+			client, err := instancekey.Lookup("NATS", name, natsx.Named)
 			if err != nil {
-				return apprun.Service{}, err
+				return apprun.Service{}, fmt.Errorf("natsboot: %w", err)
 			}
 			// 副本数的默认上限取自实例配置的地址数，避免运行时发现的节点改变策略。
 			batch, err := cfg.bind(len(client.Conn().Opts.Servers), js, core)
@@ -63,16 +63,6 @@ func ConsumerService(name string, js *natsx.JetStreamHandlerRegistry, core *nats
 			}, nil
 		},
 	}
-}
-
-// Named 在实例缺失或已关闭时 panic，装配错误由 Build 返回给宿主。
-func lookupClient(name string) (client *natsx.Client, err error) {
-	defer func() {
-		if cause := recover(); cause != nil {
-			err = fmt.Errorf("natsboot: look up NATS %q: %v", name, cause)
-		}
-	}()
-	return natsx.Named(name), nil
 }
 
 type consumerService struct {
