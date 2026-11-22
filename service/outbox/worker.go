@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"sync/atomic"
 	"time"
 
@@ -21,26 +20,25 @@ import (
 type Worker struct {
 	store       *repo.Store
 	handlerType constant.OutboxHandlerType
-	binding     HandlerConfig
+	handler     Handler
 	retryCursor atomic.Pointer[repo.PendingCursor]
 }
 
-// NewWorker 为任务表绑定一种发布类型，发布器和目标清单在构造后固定。
-func NewWorker(store *repo.Store, handlerType constant.OutboxHandlerType, cfg HandlerConfig) (*Worker, error) {
+// NewWorker 为任务表绑定一种发布类型，发布器在构造后固定。
+func NewWorker(store *repo.Store, handlerType constant.OutboxHandlerType, handler Handler) (*Worker, error) {
 	if store == nil {
 		return nil, ErrInvalidArgument
 	}
 	if !handlerType.Valid() {
 		return nil, fmt.Errorf("%w: invalid handler type %q", ErrInvalidArgument, handlerType)
 	}
-	if cfg.Handler == nil || len(cfg.ResourceNames) == 0 {
-		return nil, fmt.Errorf("%w: handler and resource names required", ErrInvalidArgument)
+	if handler == nil {
+		return nil, fmt.Errorf("%w: handler required", ErrInvalidArgument)
 	}
-	cfg.ResourceNames = slices.Clone(cfg.ResourceNames)
 	return &Worker{
 		store:       store,
 		handlerType: handlerType,
-		binding:     cfg,
+		handler:     handler,
 	}, nil
 }
 
@@ -150,7 +148,7 @@ func (w *Worker) send(ctx context.Context, id int64, pendingType *constant.Outbo
 			logit.AddMeta(ctx, logit.Str(logit.LogId, row.LogID))
 		}
 		begin := time.Now()
-		err := publish(ctx, w.binding.Handler, model.Delivery{
+		err := publish(ctx, w.handler, model.Delivery{
 			ID:           id,
 			ResourceName: row.ResourceName,
 			Payload:      row.Payload,

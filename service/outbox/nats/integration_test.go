@@ -20,9 +20,20 @@ import (
 	"gorm.io/gorm"
 )
 
-type testPublisher func(context.Context, model.Delivery) error
+// 模拟 Broker 已确认、数据库尚未提交时取消，补偿应沿用同一个消息 ID。
+type cancelAfterAck struct {
+	*JetStreamHandler
+	cancel context.CancelFunc
+	calls  atomic.Int64
+}
 
-func (f testPublisher) Publish(ctx context.Context, d model.Delivery) error { return f(ctx, d) }
+func (h *cancelAfterAck) Publish(ctx context.Context, d model.Delivery) error {
+	err := h.JetStreamHandler.Publish(ctx, d)
+	if err == nil && h.calls.Add(1) == 1 {
+		h.cancel()
+	}
+	return err
+}
 
 func TestDatabaseToJetStreamRecovery(t *testing.T) {
 	for backend, key := range map[constant.Backend]string{
@@ -79,22 +90,14 @@ func TestDatabaseToJetStreamRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			handler := NewJetStreamHandler(map[string]*natsx.Client{"events": client})
+			handler, err := NewJetStreamHandler("events", map[string]*natsx.Client{"events": client})
+			if err != nil {
+				t.Fatal(err)
+			}
 			sendCtx, cancelSend := context.WithCancel(ctx)
 			defer cancelSend()
-			var calls atomic.Int64
-			publish := func(ctx context.Context, d model.Delivery) error {
-				err := handler.Publish(ctx, d)
-				if err == nil && calls.Add(1) == 1 {
-					// Broker 已确认，调用方却在事务回写前取消。补偿必须沿用同一个消息 ID。
-					cancelSend()
-				}
-				return err
-			}
-			worker, err := outbox.NewWorker(store, constant.NatsJetStream, outbox.HandlerConfig{
-				Handler:       testPublisher(publish),
-				ResourceNames: []string{"events"},
-			})
+			publisher := &cancelAfterAck{JetStreamHandler: handler, cancel: cancelSend}
+			worker, err := outbox.NewWorker(store, constant.NatsJetStream, publisher)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +129,7 @@ func TestDatabaseToJetStreamRecovery(t *testing.T) {
 			if err := worker.Send(ctx, id); !errors.Is(err, repo.ErrNotFound) {
 				t.Fatalf("回滚任务应返回 ErrNotFound: %v", err)
 			}
-			if calls.Load() != 0 {
+			if publisher.calls.Load() != 0 {
 				t.Fatal("未提交任务不能发送")
 			}
 			if err := db.Transaction(func(tx *gorm.DB) error {
@@ -157,8 +160,8 @@ func TestDatabaseToJetStreamRecovery(t *testing.T) {
 			}
 
 			info, err := stream.Info(ctx)
-			if err != nil || info.State.Msgs != 1 || calls.Load() != 2 {
-				t.Fatalf("补偿未去重: %+v %v, calls=%d", info, err, calls.Load())
+			if err != nil || info.State.Msgs != 1 || publisher.calls.Load() != 2 {
+				t.Fatalf("补偿未去重: %+v %v, calls=%d", info, err, publisher.calls.Load())
 			}
 			stored, err := stream.GetMsg(ctx, 1)
 			if err != nil || string(stored.Data) != "original" || stored.Header.Get("Nats-Msg-Id") != strconv.FormatInt(id, 10) {

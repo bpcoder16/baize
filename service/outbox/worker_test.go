@@ -51,13 +51,10 @@ func TestWorkersSendAndRetryOnlyTheirBoundType(t *testing.T) {
 				published = append(published, d.ID)
 				return nil
 			})
-			secondWorker, err := outbox.NewWorker(s, other, outbox.HandlerConfig{
-				Handler: testPublisher(func(_ context.Context, d model.Delivery) error {
-					published = append(published, d.ID)
-					return nil
-				}),
-				ResourceNames: []string{"events"},
-			})
+			secondWorker, err := outbox.NewWorker(s, other, testPublisher(func(_ context.Context, d model.Delivery) error {
+				published = append(published, d.ID)
+				return nil
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}

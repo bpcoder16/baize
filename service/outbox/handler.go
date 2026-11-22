@@ -14,10 +14,9 @@ type Handler interface {
 	Publish(context.Context, model.Delivery) error
 }
 
-// HandlerConfig 把一个发布器绑定到其有序的目标实例清单。首项为默认目标。
-type HandlerConfig struct {
-	Handler       Handler
-	ResourceNames []string
+// JetStream 登记时要求发布器能从自己的客户端映射解析入队目标。
+type resourceResolver interface {
+	ResolveResource(name string) (string, error)
 }
 
 func publish(ctx context.Context, handler Handler, delivery model.Delivery) (err error) {

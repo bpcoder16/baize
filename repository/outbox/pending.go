@@ -14,12 +14,6 @@ type PendingCursor struct {
 	upper int64
 }
 
-// WalkPending 从头扫描至本次固定的 ID 上界，每条待发记录至多交给 visit 一次。
-func (s *Store) WalkPending(ctx context.Context, handlerType constant.OutboxHandlerType, batchSize int, visit func(int64) error) error {
-	var cursor PendingCursor
-	return s.ResumePending(ctx, handlerType, batchSize, &cursor, visit)
-}
-
 // ResumePending 继续扫描同一 Store 和类型的待发任务。取消后保留进度，扫完后游标回到零值。
 // 调用期间由调用方独占 cursor。visit 返回错误时保留该行供下轮重试，整轮取消时则越过本次尝试。
 func (s *Store) ResumePending(ctx context.Context, handlerType constant.OutboxHandlerType, batchSize int, cursor *PendingCursor, visit func(int64) error) error {

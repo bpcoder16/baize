@@ -234,7 +234,9 @@ Gin 宿主导入 `github.com/bpcoder16/baize/bootstrap/httpboot`，通过 `route
 
 在 debug/test 模式下，宿主需提前导入生成的 Swag 文档包，每个 `--instanceName` 与模块的 `Name` 对应。`/docs` 默认展示首个模块，`/docs/<Name>` 和 `/openapi/<Name>.json` 分别提供页面和 JSON。省略模块时使用 Swag 默认实例，JSON 位于 `/openapi/doc.json`。release 模式跳过文档注册。
 
-Cron 宿主导入 `github.com/bpcoder16/baize/bootstrap/cronboot`，通过 `cronx.MustNewHandlerRegistry` 登记签名为 `func(context.Context) error` 的包级函数。每个进程声明一个 Cron 服务，`cron.yaml` 的 `jobs` 按名称选择任务，名称区分大小写。每项可选固定间隔 `every`、六字段表达式 `cron`（从秒开始，使用应用时区）或随机间隔 `randomEvery`。固定间隔与随机下限至少为 `100ms`，随机上限须大于下限。`jobs: []` 可停用全部任务。[Cron 模板](conf.example/cron.yaml)
+Cron 宿主导入 `github.com/bpcoder16/baize/bootstrap/cronboot`，通过 `cronx.MustNewHandlerRegistry` 登记签名为 `func(context.Context) error` 的包级函数。每个进程声明一个 Cron 服务，`cron.yaml` 的 `jobs` 按名称选择任务，名称区分大小写。每项可选固定间隔 `every`、六字段表达式 `cron`（从秒开始，使用应用时区）或随机间隔 `randomEvery`。固定间隔与随机下限至少为 `100ms`，随机上限须大于下限。[Cron 模板](conf.example/cron.yaml)
+
+设置 `jobs: []` 会停用 YAML 中配置的任务。准备步骤通过 `cronboot.AddJob` 登记的任务仍会运行，例如 JetStream Outbox 补偿。使用 `outboxboot.PrepareJetStream` 的宿主须启用 Cron，供该步骤登记补偿任务。
 
 多副本部署时，可在 `lock.redisName` 引用 `redisboot.Instances` 已声明的实例。同组副本使用相同的 Redis 数据库、`keyPrefix` 和任务名，未获锁的副本跳过本轮。开启锁时每个任务须配置正的 `timeout`，超时会取消 Handler 的 context，任务实际返回后才解锁。
 
@@ -280,7 +282,7 @@ outboxboot.PrepareJetStream(outboxboot.JetStreamConfig{
 
 滚动新增发布目标时，先将目标追加到所有投递副本的名单，全部生效后再向它登记任务。下线目标时，先让所有生产端停止向它登记（包括通过名单首项选取默认目标的调用），待在途业务事务结束、该目标的 `pending` 数量归零后，再从各副本移除。副本遇到名单外的目标会将任务标为 `failed`。
 
-在写业务数据的同一个事务里调用 `outbox.EnqueueJetStreamTx(tx, outbox.JetStreamMessage{...})`。事务须从所选主库的同一个连接池开启，并使用配置的数据库和 schema。传入同方言的其他连接池返回 `ErrInvalidSession`。消息要求合法的 `Subject`、显式的 `Data` 和 `Header`，以及非零的 `ExpiresAt`。允许空数据和空 Header。Header 名须为合法 HTTP token，例如 `X-Trace-ID`，非法名称在入队时返回 `ErrInvalidArgument`。`ResourceName` 省略时使用名单首项。实际目标名称及 `handler_type=nats_jetstream` 随任务一起入库。
+在写业务数据的同一个事务里调用 `outbox.EnqueueJetStreamTx(tx, outbox.JetStreamMessage{...})`。事务须从所选主库的同一个连接池开启，并使用配置的数据库和 schema。传入同方言的其他连接池返回 `ErrInvalidSession`。消息要求合法的 `Subject`、显式的 `Data` 和 `Header`，以及非零的 `ExpiresAt`。允许空数据和空 Header。Header 名须为合法 HTTP token，例如 `X-Trace-ID`，非法名称在入队时返回 `ErrInvalidArgument`。`ResourceName` 省略时使用名单首项。实际目标名称及 `handler_type=nats_jetstream` 随任务一起入库。事务上下文中的 `logId` 仅用于调试，缺失或超出两种数据库共同支持的文本范围时留空，业务事务可正常提交。
 
 最外层业务事务提交后，可调用 `outbox.SendJetStream(ctx, id)` 或 `outbox.SendAsyncJetStream(id)`。通用入口 `outbox.Send(ctx, handlerType, id)` 和 `outbox.SendAsync(handlerType, id)` 接收显式类型。重试沿用任务 ID 作为 `Nats-Msg-Id`，消费端仍需幂等。
 

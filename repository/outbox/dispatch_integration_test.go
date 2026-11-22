@@ -23,10 +23,7 @@ func (f testPublisher) Publish(ctx context.Context, d model.Delivery) error { re
 
 func testWorker(t *testing.T, s *repo.Store, handler testPublisher) *outbox.Worker {
 	t.Helper()
-	w, err := outbox.NewWorker(s, constant.NatsJetStream, outbox.HandlerConfig{
-		Handler:       handler,
-		ResourceNames: []string{"events"},
-	})
+	w, err := outbox.NewWorker(s, constant.NatsJetStream, handler)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@
 package testdb
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"testing"
@@ -17,8 +18,14 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// 只在随机命名的隔离数据库中迁移和写入，不修改 DSN 原有数据库。
-func Open(t *testing.T, backend constant.Backend, mysqlLocation ...*time.Location) *gorm.DB {
+// Database 保存已指向临时库的驱动配置，测试可以打开连接或生成宿主配置。
+type Database struct {
+	MySQL      *driver.Config
+	PostgreSQL *pgx.ConnConfig
+}
+
+// Create 只创建随机命名的隔离库。测试结束时先回收后登记的业务连接，再删除该库。
+func Create(t *testing.T, backend constant.Backend) Database {
 	t.Helper()
 	key := "BAIZE_OUTBOX_MYSQL_DSN"
 	if backend == constant.PostgreSQL {
@@ -29,73 +36,82 @@ func Open(t *testing.T, backend constant.Backend, mysqlLocation ...*time.Locatio
 		t.Skip("未设置 " + key + "；真实数据库验收未运行")
 	}
 	name := fmt.Sprintf("baize_test_%d_%d", os.Getpid(), time.Now().UnixNano())
-	gormConfig := &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
-	var admin, db *gorm.DB
-	var err error
-	created := false
-	if backend == constant.MySQL {
-		cfg, parseErr := driver.ParseDSN(dsn)
-		if parseErr != nil {
-			t.Fatal(parseErr)
-		}
-		cfg.DBName = ""
-		cfg.ParseTime = true
-		cfg.Loc, err = time.LoadLocation("Asia/Shanghai")
+	create := "CREATE DATABASE " + name
+	var admin *sql.DB
+	var db Database
+	switch backend {
+	case constant.MySQL:
+		cfg, err := driver.ParseDSN(dsn)
 		if err != nil {
 			t.Fatal(err)
 		}
+		cfg.DBName = ""
+		admin, err = sql.Open("mysql", cfg.FormatDSN())
+		if err != nil {
+			t.Fatal(err)
+		}
+		create += " CHARACTER SET utf8mb4"
+		cfg.DBName = name
+		db.MySQL = cfg
+	case constant.PostgreSQL:
+		cfg, err := pgx.ParseConfig(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Database = "postgres"
+		admin = stdlib.OpenDB(*cfg)
+		cfg.Database = name
+		db.PostgreSQL = cfg
+	default:
+		t.Fatalf("不支持的测试数据库 %q", backend)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	if _, err := admin.ExecContext(t.Context(), create); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec("DROP DATABASE " + name); err != nil {
+			t.Error(err)
+		}
+	})
+	return db
+}
+
+// Open 在独立临时库上打开 GORM 连接，可为 MySQL 指定会话和驱动共用的时区。
+func Open(t *testing.T, backend constant.Backend, mysqlLocation ...*time.Location) *gorm.DB {
+	t.Helper()
+	db := Create(t, backend)
+	var pool *sql.DB
+	var dialect gorm.Dialector
+	if cfg := db.MySQL; cfg != nil {
+		var err error
+		cfg.ParseTime = true
 		if len(mysqlLocation) > 0 {
 			cfg.Loc = mysqlLocation[0]
+		} else {
+			cfg.Loc, err = time.LoadLocation("Asia/Shanghai")
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 		if cfg.Params == nil {
 			cfg.Params = make(map[string]string)
 		}
 		// TIMESTAMP 由会话转换，驱动的解析时区必须与每条连接保持一致。
 		cfg.Params["time_zone"] = "'" + time.Now().In(cfg.Loc).Format("-07:00") + "'"
-		admin, err = gorm.Open(mysql.Open(cfg.FormatDSN()), gormConfig)
-		if err == nil {
-			err = admin.Exec("CREATE DATABASE " + name + " CHARACTER SET utf8mb4").Error
-			created = err == nil
+		pool, err = sql.Open("mysql", cfg.FormatDSN())
+		if err != nil {
+			t.Fatal(err)
 		}
-		if err == nil {
-			cfg.DBName = name
-			db, err = gorm.Open(mysql.Open(cfg.FormatDSN()), gormConfig)
-		}
+		dialect = mysql.New(mysql.Config{Conn: pool})
 	} else {
-		cfg, parseErr := pgx.ParseConfig(dsn)
-		if parseErr != nil {
-			t.Fatal(parseErr)
-		}
-		cfg.Database = "postgres"
-		pool := stdlib.OpenDB(*cfg)
-		admin, err = gorm.Open(postgres.New(postgres.Config{Conn: pool}), gormConfig)
-		if err == nil {
-			err = admin.Exec("CREATE DATABASE " + name).Error
-			created = err == nil
-		}
-		if err == nil {
-			cfg.Database = name
-			pool = stdlib.OpenDB(*cfg)
-			db, err = gorm.Open(postgres.New(postgres.Config{Conn: pool}), gormConfig)
-		}
+		pool = stdlib.OpenDB(*db.PostgreSQL)
+		dialect = postgres.New(postgres.Config{Conn: pool})
 	}
-	if admin != nil && admin.Statement != nil {
-		t.Cleanup(func() {
-			if db != nil {
-				pool, _ := db.DB()
-				_ = pool.Close()
-			}
-			if created {
-				if err := admin.Exec("DROP DATABASE IF EXISTS " + name).Error; err != nil {
-					t.Error(err)
-				}
-			}
-			pool, _ := admin.DB()
-			_ = pool.Close()
-		})
-	}
+	t.Cleanup(func() { _ = pool.Close() })
+	conn, err := gorm.Open(dialect, &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return db
+	return conn
 }

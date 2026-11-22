@@ -2,7 +2,6 @@ package outboxboot
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,15 +20,13 @@ import (
 	"github.com/bpcoder16/baize/bootstrap/natsboot"
 	"github.com/bpcoder16/baize/bootstrap/postgresqlboot"
 	"github.com/bpcoder16/baize/constant"
+	"github.com/bpcoder16/baize/internal/testdb"
 	model "github.com/bpcoder16/baize/model/outbox"
 	repo "github.com/bpcoder16/baize/repository/outbox"
 	"github.com/bpcoder16/baize/service/outbox"
 	"github.com/bpcoder16/pixiu/infra/cronx"
 	"github.com/bpcoder16/pixiu/infra/natsx"
 	"github.com/bpcoder16/pixiu/lifecycle"
-	mysql "github.com/go-sql-driver/mysql"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go/jetstream"
 	"gorm.io/gorm"
@@ -41,9 +38,6 @@ func TestOutboxPlan(t *testing.T) {
 	if backend == "" {
 		for _, b := range []constant.Backend{constant.MySQL, constant.PostgreSQL} {
 			t.Run(string(b), func(t *testing.T) {
-				if os.Getenv("BAIZE_OUTBOX_"+strings.ToUpper(string(b))+"_DSN") == "" {
-					t.Skip("未设置集成测试数据库 DSN")
-				}
 				cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestOutboxPlan$")
 				cmd.Env = append(os.Environ(), "BAIZE_OUTBOX_TEST_CHILD="+string(b), "BAIZE_OUTBOX_TEST_DIR="+prepareFixture(t, b))
 				if output, err := cmd.CombinedOutput(); err != nil {
@@ -273,7 +267,7 @@ func prepareFixture(t *testing.T, backend constant.Backend) string {
 	conf("app", map[string]any{"env": map[string]any{"appName": "outbox", "runMode": "test", "localIP": "127.0.0.1", "timeLocation": "UTC"}, "log": map[string]any{"format": "text", "hookStd": false}})
 	conf("cron", map[string]any{"jobs": []any{}})
 	conf(string(backend)+"-migrate.orders", map[string]any{"enabled": true})
-	conf(string(backend)+".orders", testDatabase(t, backend))
+	conf(string(backend)+".orders", databaseConfig(t, testdb.Create(t, backend)))
 	for _, name := range []string{"events", "audit", "excluded", "core"} {
 		srv, err := server.NewServer(&server.Options{Host: "127.0.0.1", Port: -1, JetStream: name != "core", StoreDir: t.TempDir(), NoSigs: true})
 		if err != nil {
@@ -289,18 +283,14 @@ func prepareFixture(t *testing.T, backend constant.Backend) string {
 	return dir
 }
 
-func testDatabase(t *testing.T, b constant.Backend) map[string]any {
+// 测试库生命周期由 testdb 负责，这里只转换为宿主读取的实例配置。
+func databaseConfig(t *testing.T, db testdb.Database) map[string]any {
 	t.Helper()
-	dsn := os.Getenv("BAIZE_OUTBOX_" + strings.ToUpper(string(b)) + "_DSN")
-	var admin *sql.DB
-	var user, password, host string
+	var name, user, password, host string
 	var port int
-	if b == constant.MySQL {
-		cfg, err := mysql.ParseDSN(dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
+	if cfg := db.MySQL; cfg != nil {
 		var portText string
+		var err error
 		host, portText, err = net.SplitHostPort(cfg.Addr)
 		if err != nil {
 			t.Fatal(err)
@@ -309,31 +299,21 @@ func testDatabase(t *testing.T, b constant.Backend) map[string]any {
 		if err != nil {
 			t.Fatal(err)
 		}
-		user, password = cfg.User, cfg.Passwd
-		admin, err = sql.Open("mysql", dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
+		name, user, password = cfg.DBName, cfg.User, cfg.Passwd
 	} else {
-		cfg, err := pgx.ParseConfig(dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		admin = stdlib.OpenDB(*cfg)
-		host, port, user, password = cfg.Host, int(cfg.Port), cfg.User, cfg.Password
+		cfg := db.PostgreSQL
+		name, user, password = cfg.Database, cfg.User, cfg.Password
+		host, port = cfg.Host, int(cfg.Port)
 	}
-	t.Cleanup(func() { admin.Close() })
-	dbName := fmt.Sprintf("baize_outbox_test_%d", time.Now().UnixNano())
-	if _, err := admin.Exec("CREATE DATABASE " + dbName); err != nil {
-		t.Fatal(err)
+	cfg := map[string]any{
+		"master":   map[string]any{"host": host, "port": port},
+		"database": name,
+		"username": user,
+		"password": password,
+		"location": "UTC",
+		"logSQL":   false,
 	}
-	t.Cleanup(func() {
-		if _, err := admin.Exec("DROP DATABASE " + dbName); err != nil {
-			t.Error(err)
-		}
-	})
-	cfg := map[string]any{"master": map[string]any{"host": host, "port": port}, "database": dbName, "username": user, "password": password, "location": "UTC", "logSQL": false}
-	if b == constant.PostgreSQL {
+	if db.PostgreSQL != nil {
 		cfg["sslMode"] = "disable"
 	}
 	return cfg

@@ -3,7 +3,6 @@ package outbox
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -37,12 +36,7 @@ func validateSubject(subject string) error {
 }
 
 // task 在入队时固化目标和正文，重试时使用持久化的实例名。
-func (msg JetStreamMessage) task(names []string) (model.Task, error) {
-	if msg.ResourceName == "" {
-		msg.ResourceName = names[0]
-	} else if !slices.Contains(names, msg.ResourceName) {
-		return model.Task{}, fmt.Errorf("%w: %q", ErrInvalidResource, msg.ResourceName)
-	}
+func (msg JetStreamMessage) task() (model.Task, error) {
 	if err := validateSubject(msg.Subject); err != nil {
 		return model.Task{}, err
 	}

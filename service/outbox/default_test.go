@@ -18,12 +18,16 @@ type testPublisher func(context.Context, model.Delivery) error
 
 func (f testPublisher) Publish(ctx context.Context, d model.Delivery) error { return f(ctx, d) }
 
+func (testPublisher) ResolveResource(name string) (string, error) {
+	if name != "" && name != "events" {
+		return "", outbox.ErrInvalidResource
+	}
+	return "events", nil
+}
+
 func newWorker(t *testing.T, store *repo.Store, publish testPublisher) *outbox.Worker {
 	t.Helper()
-	worker, err := outbox.NewWorker(store, constant.NatsJetStream, outbox.HandlerConfig{
-		Handler:       publish,
-		ResourceNames: []string{"events"},
-	})
+	worker, err := outbox.NewWorker(store, constant.NatsJetStream, publish)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,10 +121,7 @@ func TestDefaultRegistration(t *testing.T) {
 func TestRegistrationIsScopedToHandlerType(t *testing.T) {
 	const other constant.OutboxHandlerType = "test_other"
 	jetStream := newWorker(t, &repo.Store{}, func(context.Context, model.Delivery) error { return nil })
-	second, err := outbox.NewWorker(&repo.Store{}, other, outbox.HandlerConfig{
-		Handler:       testPublisher(func(context.Context, model.Delivery) error { return nil }),
-		ResourceNames: []string{"other"},
-	})
+	second, err := outbox.NewWorker(&repo.Store{}, other, publishOnly{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,4 +185,22 @@ func TestDefaultConcurrentRegistrationAndUse(t *testing.T) {
 		})
 	}
 	group.Wait()
+}
+
+type publishOnly struct{}
+
+func (publishOnly) Publish(context.Context, model.Delivery) error { return nil }
+
+func TestJetStreamRegistrationRequiresTargetResolution(t *testing.T) {
+	worker, err := outbox.NewWorker(&repo.Store{}, constant.NatsJetStream, publishOnly{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unregister, err := outbox.Register(worker)
+	if unregister != nil {
+		t.Cleanup(func() { _ = unregister() })
+	}
+	if !errors.Is(err, outbox.ErrInvalidArgument) {
+		t.Fatalf("JetStream 发布器须能解析自身目标: %v", err)
+	}
 }

@@ -33,6 +33,32 @@ func isolatedNamedClients(t *testing.T) bool {
 	return false
 }
 
+func TestJetStreamTargetsComeFromBoundClients(t *testing.T) {
+	client := &natsx.Client{}
+	clients := map[string]*natsx.Client{"events": client, "audit": client}
+	handler, err := NewJetStreamHandler("events", clients)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(clients, "audit")
+	clients["later"] = client
+	for name, want := range map[string]string{"": "events", "events": "events", "audit": "audit"} {
+		if got, err := handler.ResolveResource(name); err != nil || got != want {
+			t.Errorf("目标 %q 得到 %q 和 %v，期望 %q", name, got, err, want)
+		}
+	}
+	if _, err := handler.ResolveResource("later"); !errors.Is(err, outboxerr.ErrInvalidResource) {
+		t.Fatalf("构造后加入的客户端不应成为目标: %v", err)
+	}
+	if _, err := NewJetStreamHandler("missing", clients); !errors.Is(err, outboxerr.ErrInvalidResource) {
+		t.Fatalf("默认目标必须有实际绑定: %v", err)
+	}
+	clients["unavailable"] = nil
+	if _, err := NewJetStreamHandler("events", clients); !errors.Is(err, outboxerr.ErrInvalidResource) {
+		t.Fatalf("空客户端应在绑定时报告: %v", err)
+	}
+}
+
 func TestJetStreamAcknowledgementAndStableID(t *testing.T) {
 	if !isolatedNamedClients(t) {
 		return
@@ -99,7 +125,10 @@ func TestJetStreamAcknowledgementAndStableID(t *testing.T) {
 		t.Fatal(err)
 	}
 	clients := map[string]*natsx.Client{"events": client, "audit": auditClient}
-	h := NewJetStreamHandler(clients)
+	h, err := NewJetStreamHandler("events", clients)
+	if err != nil {
+		t.Fatal(err)
+	}
 	delete(clients, "events")
 	data, _ := json.Marshal(map[string]any{
 		"subject": "events.created",
@@ -153,7 +182,11 @@ func TestJetStreamAcknowledgementAndStableID(t *testing.T) {
 	if err != nil || auditMsg.Subject != "test1.events.created" || string(auditMsg.Data) != "audit" || auditMsg.Header.Get("Nats-Msg-Id") != "42" {
 		t.Fatalf("消息未发布到指定命名客户端: %+v %v", auditMsg, err)
 	}
-	if err := NewJetStreamHandler(map[string]*natsx.Client{"events": client}).Publish(ctx, d); err == nil {
+	eventsOnly, err := NewJetStreamHandler("events", map[string]*natsx.Client{"events": client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsOnly.Publish(ctx, d); !errors.Is(err, outboxerr.ErrInvalidResource) {
 		t.Fatal("已注册但未列入 Handler 的客户端不得发布")
 	}
 	for _, suffix := range []string{" {}", " invalid"} {

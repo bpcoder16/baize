@@ -57,6 +57,7 @@
 // 扫描错误及单条超时以外的存储错误中止本轮。清理错误记 OutboxCleanupFailed。Send 接到已清理的任务 ID 时返回 ErrNotFound。
 // JetStream 入队要求合法 Subject、显式的 Data 和 Header（可为空）及非零 ExpiresAt。Header 名须符合 HTTP token 规则。
 // ResourceName 省略时取本次清单的首项，实际名称与 nats_jetstream 类型在事务中一同持久化。
+// logId 是可选调试字段。有效 UTF-8、不含零字节且至多 65535 字节的值原样入库，其余留空。
 // 主动发送与补偿发送均使用 FOR UPDATE NOWAIT；不同任务可并发发送。
 // 同一任务被锁时，Send 返回 ErrBusy，补偿跳过该任务。cronx 分布式锁协调补偿轮次。
 // 每次尝试的加锁、发布和回写共用同一个 context。提交前取消时，数据库回滚并释放行锁。

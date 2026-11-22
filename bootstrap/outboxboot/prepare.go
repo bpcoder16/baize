@@ -62,6 +62,10 @@ func PrepareJetStream(cfg JetStreamConfig) bootstrap.Step {
 			if err != nil {
 				return err
 			}
+			handler, err := outboxnats.NewJetStreamHandler(names[0], clients)
+			if err != nil {
+				return err
+			}
 			master, err := masterDB(ctx, cfg.Backend, cfg.DatabaseName)
 			if err != nil {
 				return err
@@ -76,10 +80,7 @@ func PrepareJetStream(cfg JetStreamConfig) bootstrap.Step {
 			if err != nil {
 				return fmt.Errorf("outbox schema %s/%s: %w", cfg.Backend, cfg.DatabaseName, err)
 			}
-			worker, err := outbox.NewWorker(store, constant.NatsJetStream, outbox.HandlerConfig{
-				Handler:       outboxnats.NewJetStreamHandler(clients),
-				ResourceNames: names,
-			})
+			worker, err := outbox.NewWorker(store, constant.NatsJetStream, handler)
 			if err != nil {
 				return err
 			}

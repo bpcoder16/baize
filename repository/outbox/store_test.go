@@ -3,6 +3,7 @@ package outbox_test
 import (
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -118,6 +119,51 @@ func TestDatabaseAtomicityAndSnapshot(t *testing.T) {
 		next := enqueue(t, s, db)
 		if next <= committed {
 			t.Fatalf("重复登记必须生成新 ID: %d <= %d", next, committed)
+		}
+	})
+}
+
+func TestOptionalLogIDKeepsBusinessTransaction(t *testing.T) {
+	eachDatabase(t, func(t *testing.T, s *repo.Store, db *gorm.DB) {
+		if err := db.Exec("CREATE TABLE business_write (id INT PRIMARY KEY)").Error; err != nil {
+			t.Fatal(err)
+		}
+		boundary := strings.Repeat("界", math.MaxUint16/3)
+		for i, tc := range []struct{ name, raw, want string }{
+			{"缺失", "", ""},
+			{"自定义", "业务-123", "业务-123"},
+			{"TEXT上限", boundary, boundary},
+			{"超出一字节", boundary + "a", ""},
+			{"零字节", "before\x00after", ""},
+			{"非法编码", "bad\xff", ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx := t.Context()
+				if tc.raw != "" {
+					ctx = logit.WithContext(ctx)
+					logit.AddMeta(ctx, logit.Str(logit.LogId, tc.raw))
+				}
+				var id int64
+				err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+					if err := tx.Exec("INSERT INTO business_write (id) VALUES (?)", i).Error; err != nil {
+						return err
+					}
+					var err error
+					id, err = s.InsertTx(tx, task())
+					return err
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				row, err := s.TestReadRecord(ctx, id)
+				if err != nil || row.LogID != tc.want {
+					t.Fatalf("logId 字节数为 %d，期望 %d，读取错误 %v", len(row.LogID), len(tc.want), err)
+				}
+				var count int64
+				if err := db.Table("business_write").Where("id = ?", i).Count(&count).Error; err != nil || count != 1 {
+					t.Fatalf("业务记录未提交: %d %v", count, err)
+				}
+			})
 		}
 	})
 }
@@ -436,12 +482,9 @@ func TestInsertTxRejectsOtherMaster(t *testing.T) {
 
 func TestStoreAndWorkerValidateHandlerType(t *testing.T) {
 	eachDatabase(t, func(t *testing.T, store *repo.Store, db *gorm.DB) {
-		cfg := outbox.HandlerConfig{
-			Handler:       testPublisher(func(context.Context, model.Delivery) error { return nil }),
-			ResourceNames: []string{"events"},
-		}
+		handler := testPublisher(func(context.Context, model.Delivery) error { return nil })
 		for _, kind := range []constant.OutboxHandlerType{"", "events ", "x\x00y", "中文", constant.OutboxHandlerType(strings.Repeat("x", 33))} {
-			if _, err := outbox.NewWorker(store, kind, cfg); !errors.Is(err, outbox.ErrInvalidArgument) {
+			if _, err := outbox.NewWorker(store, kind, handler); !errors.Is(err, outbox.ErrInvalidArgument) {
 				t.Errorf("Worker 接受了非法类型 %q: %v", kind, err)
 			}
 			value := task()
@@ -456,7 +499,7 @@ func TestStoreAndWorkerValidateHandlerType(t *testing.T) {
 		}
 		value := task()
 		value.HandlerType = constant.OutboxHandlerType(strings.Repeat("x", 32))
-		if _, err := outbox.NewWorker(store, value.HandlerType, cfg); err != nil {
+		if _, err := outbox.NewWorker(store, value.HandlerType, handler); err != nil {
 			t.Fatal(err)
 		}
 		enqueueTask(t, store, db, value)
@@ -514,7 +557,7 @@ func TestPendingScanAndLockedReadRespectHandlerType(t *testing.T) {
 		other := enqueueTask(t, s, db, value)
 		kind := constant.NatsJetStream
 		var ids []int64
-		if err := s.WalkPending(ctx, kind, 1, func(id int64) error {
+		if err := s.ResumePending(ctx, kind, 1, &repo.PendingCursor{}, func(id int64) error {
 			ids = append(ids, id)
 			return nil
 		}); err != nil || !slices.Equal(ids, []int64{own}) {

@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bpcoder16/baize/constant"
 	outboxerr "github.com/bpcoder16/baize/error/outbox"
@@ -110,6 +112,10 @@ func (s *Store) InsertTx(tx *gorm.DB, task model.Task) (int64, error) {
 		expiresAt = value
 	}
 	logID, _ := logit.LogIDFromContext(tx.Statement.Context)
+	// logId 仅用于调试。MySQL TEXT 最多容纳 65535 字节，PostgreSQL text 要求合法 UTF-8 且无零字节。
+	if len(logID) > math.MaxUint16 || strings.IndexByte(logID, 0) >= 0 || !utf8.ValidString(logID) {
+		logID = ""
+	}
 	values := map[string]any{
 		"handler_type":  task.HandlerType,
 		"resource_name": task.ResourceName,

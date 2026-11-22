@@ -15,10 +15,16 @@ var (
 )
 
 // Register 按 Worker 绑定的类型登记，每种类型最多登记一个 Worker。
+// JetStream 发布器还须实现 ResolveResource(string) (string, error)，供入队时选择目标。
 // 返回的清理函数只撤销本次登记，可重复调用。
 func Register(w *Worker) (func() error, error) {
 	if w == nil || w.store == nil {
 		return nil, ErrInvalidArgument
+	}
+	if w.handlerType == constant.NatsJetStream {
+		if _, ok := w.handler.(resourceResolver); !ok {
+			return nil, fmt.Errorf("%w: JetStream handler must resolve its publish targets", ErrInvalidArgument)
+		}
 	}
 	workersMu.Lock()
 	defer workersMu.Unlock()
@@ -54,7 +60,12 @@ func EnqueueJetStreamTx(tx *gorm.DB, msg JetStreamMessage) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	task, err := msg.task(w.binding.ResourceNames)
+	name, err := w.handler.(resourceResolver).ResolveResource(msg.ResourceName)
+	if err != nil {
+		return 0, err
+	}
+	msg.ResourceName = name
+	task, err := msg.task()
 	if err != nil {
 		return 0, err
 	}

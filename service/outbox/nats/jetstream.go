@@ -7,19 +7,43 @@ import (
 	"fmt"
 	"maps"
 	"strconv"
+	"strings"
 
 	outboxerr "github.com/bpcoder16/baize/error/outbox"
 	model "github.com/bpcoder16/baize/model/outbox"
 	"github.com/bpcoder16/pixiu/infra/natsx"
 )
 
-// JetStreamHandler 借用由 Prepare 验证过的命名客户端。
+// JetStreamHandler 借用已验证的命名客户端。入队和投递共用同一份目标映射。
 type JetStreamHandler struct {
-	clients map[string]*natsx.Client
+	defaultName string
+	clients     map[string]*natsx.Client
 }
 
-func NewJetStreamHandler(clients map[string]*natsx.Client) *JetStreamHandler {
-	return &JetStreamHandler{clients: maps.Clone(clients)}
+// NewJetStreamHandler 绑定默认名称和可投递的客户端。默认目标也必须在映射中。
+func NewJetStreamHandler(defaultName string, clients map[string]*natsx.Client) (*JetStreamHandler, error) {
+	for name, client := range clients {
+		// resource_name 存为最多 64 字节的 ASCII 实例名。
+		invalidChar := strings.ContainsFunc(name, func(r rune) bool { return r < '!' || r > '~' })
+		if client == nil || name == "" || len(name) > 64 || invalidChar {
+			return nil, fmt.Errorf("%w: invalid JetStream binding %q", outboxerr.ErrInvalidResource, name)
+		}
+	}
+	if clients[defaultName] == nil {
+		return nil, fmt.Errorf("%w: unknown default JetStream target %q", outboxerr.ErrInvalidResource, defaultName)
+	}
+	return &JetStreamHandler{defaultName: defaultName, clients: maps.Clone(clients)}, nil
+}
+
+// ResolveResource 仅在入队时补全默认目标；投递时使用任务里固化的名称。
+func (h *JetStreamHandler) ResolveResource(name string) (string, error) {
+	if name == "" {
+		name = h.defaultName
+	}
+	if h.clients[name] == nil {
+		return "", fmt.Errorf("%w: %q", outboxerr.ErrInvalidResource, name)
+	}
+	return name, nil
 }
 
 // Publish 使用任务 ID 去重，等待有效的 JetStream PubAck。
