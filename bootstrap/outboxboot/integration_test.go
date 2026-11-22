@@ -61,17 +61,24 @@ func TestOutboxPlan(t *testing.T) {
 	cfg.CronTaskEvery = 500 * time.Millisecond
 	prepare := PrepareJetStream(cfg)
 	names[0] = "excluded"
-	// 先在独立的 Cron 清单中制造重名，随后正常 Prepare 应能登记新的 Worker。
-	conflict := bootstrap.Step{
-		Name: "conflicting-outbox-job",
+	// 普通副本先在空库报错。迁移配置建表后，即使 Cron 登记重名，普通副本也能复用已提交的表。
+	migrationDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(migrationDir, string(backend)+"-migrate.orders.yaml"), []byte("enabled: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	failedPrepares := bootstrap.Step{
+		Name: "check-failed-outbox-preparations",
 		Init: func(ctx context.Context, dir string, stack *lifecycle.Stack) error {
+			if err := prepare.Init(ctx, dir, stack); err == nil || !strings.Contains(err.Error(), "baize_outbox") {
+				return fmt.Errorf("关闭迁移且缺表时启动应报告 baize_outbox，得到 %v", err)
+			}
 			var registry cronx.HandlerRegistry
 			registry.MustRegister(func(context.Context) error { return nil }, "baize.outbox.retry.nats_jetstream")
 			conflictCtx, err := cronboot.Service(&registry).BeforePrepare(ctx)
 			if err != nil {
 				return err
 			}
-			if err := prepare.Init(conflictCtx, dir, stack); err == nil || !strings.Contains(err.Error(), "duplicate job") {
+			if err := prepare.Init(conflictCtx, migrationDir, stack); err == nil || !strings.Contains(err.Error(), "duplicate job") {
 				return fmt.Errorf("expected duplicate Outbox job: %v", err)
 			}
 			return nil
@@ -80,7 +87,7 @@ func TestOutboxPlan(t *testing.T) {
 	plan := bootstrap.Plan{
 		Resources: []bootstrap.Resource{dbResource, natsboot.Instances("audit", "excluded", "events", "core")},
 		Services:  []bootstrap.Service{cronboot.Service(nil)},
-		Prepare: []bootstrap.Step{conflict, prepare, {Name: "enqueue", Init: func(ctx context.Context, _ string, _ *lifecycle.Stack) error {
+		Prepare: []bootstrap.Step{failedPrepares, prepare, {Name: "enqueue", Init: func(ctx context.Context, _ string, _ *lifecycle.Stack) error {
 			db, err := masterDB(ctx, backend, "orders")
 			if err != nil {
 				return err
@@ -118,8 +125,8 @@ func TestOutboxPlan(t *testing.T) {
 			if _, err := jetStreamClients(ctx, []string{"audit", "core"}); err == nil || !strings.Contains(err.Error(), "core") {
 				return fmt.Errorf("JetStream-disabled instance: %v", err)
 			}
-			// 再次启动仓储，验证重复迁移，并模拟目标被移出名单的积压任务。
-			store, err := repo.Open(ctx, repo.StoreConfig{Backend: backend, MasterDB: db})
+			// 复用已有表，模拟目标被移出名单的积压任务。
+			store, err := repo.OpenExisting(ctx, repo.StoreConfig{Backend: backend, MasterDB: db})
 			if err != nil {
 				return err
 			}
@@ -266,7 +273,7 @@ func prepareFixture(t *testing.T, backend constant.Backend) string {
 	}
 	conf("app", map[string]any{"env": map[string]any{"appName": "outbox", "runMode": "test", "localIP": "127.0.0.1", "timeLocation": "UTC"}, "log": map[string]any{"format": "text", "hookStd": false}})
 	conf("cron", map[string]any{"jobs": []any{}})
-	conf(string(backend)+"-migrate.orders", map[string]any{"enabled": true})
+	conf(string(backend)+"-migrate.orders", map[string]any{"enabled": false})
 	conf(string(backend)+".orders", databaseConfig(t, testdb.Create(t, backend)))
 	for _, name := range []string{"events", "audit", "excluded", "core"} {
 		srv, err := server.NewServer(&server.Options{Host: "127.0.0.1", Port: -1, JetStream: name != "core", StoreDir: t.TempDir(), NoSigs: true})

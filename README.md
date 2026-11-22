@@ -278,7 +278,9 @@ outboxboot.PrepareJetStream(outboxboot.JetStreamConfig{
 })
 ```
 
-所选实例须开启迁移，宿主须启用 Cron。Prepare 验证名单内的 NATS 实例可访问 JetStream，随后在数据库会话锁内迁移 `baize_outbox`，并登记 `nats_jetstream` Worker。同进程每种 Handler 类型最多登记一个 Worker。同库同 schema 的 Worker 可以共用该表，共用同一张表和类型的副本配置相同的发布名单。
+Outbox 沿用所选 MySQL 或 PostgreSQL 实例的迁移配置。首次部署或升级时，由一个进程设置 `enabled: true`，在数据库会话锁内创建或更新 `baize_outbox`。迁移完成后，普通副本设置 `enabled: false`，直接使用已有表。空表可正常启动，缺表会在 Prepare 阶段报错。
+
+宿主须启用 Cron。Prepare 验证名单内的 NATS 实例可访问 JetStream，打开任务表后登记 `nats_jetstream` Worker 和补偿任务。同进程每种 Handler 类型最多登记一个 Worker。同库同 schema 的 Worker 可以共用该表，共用同一张表和类型的副本配置相同的发布名单。
 
 滚动新增发布目标时，先将目标追加到所有投递副本的名单，全部生效后再向它登记任务。下线目标时，先让所有生产端停止向它登记（包括通过名单首项选取默认目标的调用），待在途业务事务结束、该目标的 `pending` 数量归零后，再从各副本移除。副本遇到名单外的目标会将任务标为 `failed`。
 

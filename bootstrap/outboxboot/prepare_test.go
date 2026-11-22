@@ -24,24 +24,17 @@ func testConfig(names ...string) JetStreamConfig {
 	}
 }
 
-func TestPrepareRequiresMigrationAndJetStream(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		enabled string
-		want    string
-	}{
-		{"migration-disabled", "false", "migration enabled"},
-		{"no-nats", "true", "not declared"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+func TestPrepareRequiresDeclaredJetStream(t *testing.T) {
+	for _, enabled := range []string{"false", "true"} {
+		t.Run("migration="+enabled, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "mysql-migrate.orders.yaml"), []byte("enabled: "+tc.enabled), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "mysql-migrate.orders.yaml"), []byte("enabled: "+enabled), 0600); err != nil {
 				t.Fatal(err)
 			}
 			var stack lifecycle.Stack
 			err := PrepareJetStream(testConfig("events")).Init(t.Context(), dir, &stack)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("got %v, want %s", err, tc.want)
+			if err == nil || !strings.Contains(err.Error(), "not declared") {
+				t.Fatalf("应报告未声明的 NATS 实例，得到 %v", err)
 			}
 		})
 	}

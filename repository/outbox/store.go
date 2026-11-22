@@ -20,7 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Store 借用配置中的主库，由 Open 完成表结构迁移。
+// Store 借用配置中的主库读写事务发件箱。
 type Store struct {
 	cfg        StoreConfig
 	masterPool *sql.DB
@@ -28,6 +28,15 @@ type Store struct {
 
 // Open 校验主库并在迁移锁内准备任务表，成功后 Store 即可使用。
 func Open(ctx context.Context, cfg StoreConfig) (*Store, error) {
+	return open(ctx, cfg, true)
+}
+
+// OpenExisting 使用已迁移的任务表，表不存在或不可读时返回数据库错误。
+func OpenExisting(ctx context.Context, cfg StoreConfig) (*Store, error) {
+	return open(ctx, cfg, false)
+}
+
+func open(ctx context.Context, cfg StoreConfig, migrate bool) (*Store, error) {
 	if cfg.MasterDB == nil {
 		return nil, fmt.Errorf("%w: master database required", outboxerr.ErrInvalidArgument)
 	}
@@ -52,6 +61,13 @@ func Open(ctx context.Context, cfg StoreConfig) (*Store, error) {
 		return nil, err
 	}
 	table := s.tableModel()
+	if !migrate {
+		// 零行查询确认表可读，空表也可启动。
+		if err = db.Select("1").Limit(0).Find(table).Error; err != nil {
+			return nil, fmt.Errorf("outbox: read existing table %s: %w", table.TableName(), err)
+		}
+		return s, nil
+	}
 	err = dbinit.Migrate(ctx, db, cfg.Backend, table.TableName(), []schemamigrate.Table{
 		{Model: table, Comment: "事务发件箱"},
 	})

@@ -54,10 +54,6 @@ func PrepareJetStream(cfg JetStreamConfig) bootstrap.Step {
 			if err != nil {
 				return err
 			}
-			if !migrationCfg.Enabled {
-				return fmt.Errorf("outbox requires migration enabled for %s/%s", cfg.Backend, cfg.DatabaseName)
-			}
-
 			clients, err := jetStreamClients(ctx, names)
 			if err != nil {
 				return err
@@ -72,7 +68,11 @@ func PrepareJetStream(cfg JetStreamConfig) bootstrap.Step {
 			}
 			schemaCtx, cancel := context.WithTimeout(ctx, migrationCfg.Timeout)
 			defer cancel()
-			store, err := repo.Open(schemaCtx, repo.StoreConfig{
+			openStore := repo.OpenExisting
+			if migrationCfg.Enabled {
+				openStore = repo.Open
+			}
+			store, err := openStore(schemaCtx, repo.StoreConfig{
 				Backend:  cfg.Backend,
 				MasterDB: master,
 				Location: env.TimeLocation(),

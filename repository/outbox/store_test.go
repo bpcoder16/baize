@@ -71,6 +71,38 @@ func enqueue(t *testing.T, s *repo.Store, db *gorm.DB) int64 {
 	return enqueueTask(t, s, db, task())
 }
 
+func TestOpenExisting(t *testing.T) {
+	for _, backend := range []constant.Backend{constant.MySQL, constant.PostgreSQL} {
+		t.Run(string(backend), func(t *testing.T) {
+			ctx := t.Context()
+			db := testdb.Open(t, backend)
+			cfg := repo.StoreConfig{Backend: backend, MasterDB: db}
+			if _, err := repo.OpenExisting(ctx, cfg); err == nil || !strings.Contains(err.Error(), "baize_outbox") {
+				t.Fatalf("缺表应返回包含表名的错误，得到 %v", err)
+			}
+			if db.Migrator().HasTable("baize_outbox") {
+				t.Fatal("关闭迁移不应创建表")
+			}
+			if _, err := repo.Open(ctx, cfg); err != nil {
+				t.Fatal(err)
+			}
+			// 空表也应可用。移除一个次要索引，可观察普通副本是否意外执行了迁移。
+			const index = "baize_outbox_ready_idx"
+			if err := db.Migrator().DropIndex("baize_outbox", index); err != nil {
+				t.Fatal(err)
+			}
+			store, err := repo.OpenExisting(ctx, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if db.Migrator().HasIndex("baize_outbox", index) {
+				t.Fatal("关闭迁移不应重建索引")
+			}
+			enqueue(t, store, db)
+		})
+	}
+}
+
 func TestDatabaseAtomicityAndSnapshot(t *testing.T) {
 	eachDatabase(t, func(t *testing.T, s *repo.Store, db *gorm.DB) {
 		ctx := logit.WithContextLogID(context.Background())
