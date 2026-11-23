@@ -6,8 +6,8 @@ import (
 
 	"github.com/bpcoder16/baize/bootstrap"
 	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
-	"github.com/bpcoder16/pixiu/biz/lockx"
-	"github.com/bpcoder16/pixiu/biz/lockx/redislock"
+	"github.com/bpcoder16/baize/service/lockx"
+	"github.com/bpcoder16/baize/service/lockx/redislock"
 	"github.com/bpcoder16/pixiu/infra/redisx"
 	"github.com/bpcoder16/pixiu/lifecycle"
 )

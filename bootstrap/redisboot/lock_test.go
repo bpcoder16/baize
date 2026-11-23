@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/bpcoder16/pixiu/biz/lockx"
-	"github.com/bpcoder16/pixiu/biz/lockx/redislock"
+	"github.com/bpcoder16/baize/service/lockx"
+	"github.com/bpcoder16/baize/service/lockx/redislock"
 	"github.com/bpcoder16/pixiu/lifecycle"
 )
 
