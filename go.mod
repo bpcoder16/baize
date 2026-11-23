@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.50.0
 	github.com/alicebob/miniredis/v2 v2.40.0
-	github.com/bpcoder16/pixiu v0.2.6
+	github.com/bpcoder16/pixiu v0.2.9
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-co-op/gocron-redis-lock/v2 v2.2.1
 	github.com/go-co-op/gocron/v2 v2.23.0

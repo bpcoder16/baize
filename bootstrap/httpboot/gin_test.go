@@ -78,12 +78,31 @@ func TestGin(t *testing.T) {
 		t.Fatalf("无效的 HTTP 超时得到 %v", err)
 	}
 	write("http.yaml", "addr: 127.0.0.1:0\n")
+	write("gin.yaml", "cors:\n  - pathPrefix: /probe\n    allowMethods: [GET]\n")
+	if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "gin.yaml") || !strings.Contains(err.Error(), "allowOrigins") {
+		t.Fatalf("跨域规则错误缺少配置位置: %v", err)
+	}
+	write("gin.yaml", `disableAccessLog: true
+cors:
+  - pathPrefix: /probe
+    allowOrigins: ["https://web.example.com"]
+    allowMethods: [GET]
+    maxAge: 10m
+`)
 	service, err := decl.Build(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 || engine == nil || gin.Mode() != mode {
 		t.Fatalf("注册次数 %d，Gin 模式 %s", calls, gin.Mode())
+	}
+	req := httptest.NewRequest(http.MethodOptions, "/probe", nil)
+	req.Header.Set("Origin", "https://web.example.com")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	preflight := httptest.NewRecorder()
+	engine.ServeHTTP(preflight, req)
+	if preflight.Code != http.StatusNoContent || preflight.Header().Get("Access-Control-Max-Age") != "600" {
+		t.Fatalf("预检响应 %d %v", preflight.Code, preflight.Header())
 	}
 	for _, path := range []string{"/probe", "/docs", "/docs/app", "/openapi/app.json"} {
 		w := httptest.NewRecorder()

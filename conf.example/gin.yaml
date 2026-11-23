@@ -8,3 +8,13 @@ disableAccessLog: false  # 设为 true 关闭访问日志和详情采集，仍�
 # 详情包含完整请求头或响应头及正文。开启请求详情前，应在 Gin 外层限制请求体大小和读取时间。
 logRequestInfo: false   # 记录请求详情
 logResponseInfo: false  # 记录响应详情
+
+# 可选跨域策略，省略或空列表关闭。启用时取消下面的注释并填写实际来源。
+# cors:
+#   - pathPrefix: /api
+#     allowOrigins: ["https://web.example.com"]
+#     allowMethods: [POST]
+#     allowHeaders: [Authorization, Content-Type]
+#     exposeHeaders: [PIXIU-Log-Id]
+#     allowCredentials: false
+#     maxAge: 10m

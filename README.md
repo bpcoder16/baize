@@ -15,7 +15,12 @@
 
 ## 项目状态
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务装配支持 Realtime WebSocket、Gin HTTP、Cron，以及按 NATS 实例声明的 Core 和 JetStream 消费者。JetStream Outbox 的事务登记、投递与补偿由 Baize 提供。
+当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务装配支持 Realtime WebSocket、Gin HTTP、Cron，以及按 NATS 实例声明的 Core 和 JetStream 消费者。Baize 提供固定租期的单节点 Redis 锁，以及 JetStream Outbox 的事务登记、投递与补偿。
+
+## 业务编号与展示
+
+- `bizid.Generate("PD")` 生成带前缀的业务编号，沿用应用时区、毫秒时间和四位随机尾号。需要唯一编号的表应设置唯一索引并处理冲突。[业务编号文档](bizid/doc.go)
+- `display.FormatTime(t)` 按应用时区输出 RFC3339，空时间返回空字符串。`display.MaskName("张三")` 返回 `张*`。[展示规则文档](display/doc.go)
 
 ## 初始化一个宿主
 
@@ -103,7 +108,8 @@ Prepare: []bootstrap.Step{
 在 `Plan.Resources` 中加入 `redisboot.Instances("default")`，把 [Redis 模板](conf.example/redis.default.yaml) 复制到入口配置同目录，填入单节点 Redis 的地址和凭据。一个入口使用多个 Redis 时，在同一次调用中列出所有实例名，并为每个实例提供 `redis.<name>.yaml`。
 
 ```go
-// 装配包为 github.com/bpcoder16/baize/bootstrap/redisboot。
+// 装配使用 github.com/bpcoder16/baize/bootstrap/redisboot。
+// 锁配置使用 github.com/bpcoder16/baize/service/lockx/redislock。
 plan := bootstrap.Plan{
     Resources: []bootstrap.Resource{
         mysqlboot.Instances("default"),
@@ -119,7 +125,11 @@ Redis 初始化时执行 `PING`。业务准备和服务中通过 `redisx.Named("
 
 `PrepareLock(name, redisName, cfg)` 在准备阶段复用 `redisName` 的连接池，该 Redis 实例须配置 `maxRetries: -1`。业务通过 `lockx.Named(name)` 取得执行器。
 
-例如，`redisboot.PrepareLock("jobs", "default", redislock.Config{})` 在同一个 Redis 上创建名为 `jobs` 的锁执行器，业务通过 `lockx.Named("jobs")` 使用。
+业务导入 `github.com/bpcoder16/baize/service/lockx`。例如，`lockx.Named("default").TryDoMany(ctx, keys, work)` 在取得整组锁后执行一次回调，竞争失败返回 `false, nil`。单键等待和单次尝试分别使用 `Do` 和 `TryDo`。零值配置的租期为 1 分钟，阻塞获取最多等待 5 秒，重试间隔以 50 毫秒为基准。[锁契约](service/lockx/doc.go) · [Redis 实现](service/lockx/redislock/doc.go)
+
+从 Pixiu 迁移的宿主须一并切换锁配置、执行业务的入口、测试后端和注册代码。两个包各有进程级注册表，`PrepareLock("default", …)` 登记的执行器通过 Baize 的 `lockx.Named("default")` 取得。
+
+设置 `BAIZE_REDIS_TEST_ADDR` 后运行 `go test ./service/lockx/...` 可验证真实 Redis 上的互斥和租期。另设 `BAIZE_REDIS_TEST_ACL=1` 可验证批量锁遇到权限错误时的清理行为，该用例会在测试实例上创建并删除临时 ACL 用户。
 
 ## 按需接入 NATS
 
@@ -231,6 +241,8 @@ Baize 内置准备步骤的 `Step.Name` 统一使用 `baize.` 前缀，例如 `b
 `Step.Init(ctx, configDir, resources)` 在资源就绪后按顺序执行。宿主可在这里迁移、加载业务配置、绑定处理函数。新增资源立即登记到栈。已有的资源初始化函数沿用 `Init(configDir, resources)` 签名，可自行设置连接超时。
 
 Gin 宿主导入 `github.com/bpcoder16/baize/bootstrap/httpboot`，通过 `router.Register(*gin.Engine)` 挂载自己的路由。Demo 在 `internal/http/router` 按端注册路由，在 `internal/http/handler` 编写处理函数和各端的 Swag 注释。将两份模板放在入口配置同目录，`gin.yaml` 控制可信代理和访问日志，`http.yaml` 控制监听地址与读写超时。[Gin 模板](conf.example/gin.yaml) · [HTTP 模板](conf.example/http.yaml)
+
+`gin.yaml` 可选的 `cors` 列表按路径前缀配置浏览器跨域访问。省略或留空时默认关闭；填写后由 `httpboot.Gin` 在构造 Engine 时挂载 Pixiu 中间件，业务路由只需注册实际方法。每条规则必须列举来源和方法，非法或重叠规则会在启动时报告配置文件和规则位置。
 
 在 debug/test 模式下，宿主需提前导入生成的 Swag 文档包，每个 `--instanceName` 与模块的 `Name` 对应。`/docs` 默认展示首个模块，`/docs/<Name>` 和 `/openapi/<Name>.json` 分别提供页面和 JSON。省略模块时使用 Swag 默认实例，JSON 位于 `/openapi/doc.json`。release 模式跳过文档注册。
 

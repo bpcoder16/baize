@@ -18,13 +18,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// 配置文件只接收可序列化的 Gin 选项，路由和中间件在宿主的回调中注册。
+// 配置文件只接收可序列化的 Gin 选项，宿主路由在回调中注册。
 type ginConfig struct {
-	TrustedProxies   []string `mapstructure:"trustedProxies"`
-	LoggerName       string   `mapstructure:"loggerName"`
-	DisableAccessLog bool     `mapstructure:"disableAccessLog"`
-	LogRequestInfo   bool     `mapstructure:"logRequestInfo"`
-	LogResponseInfo  bool     `mapstructure:"logResponseInfo"`
+	TrustedProxies   []string        `mapstructure:"trustedProxies"`
+	LoggerName       string          `mapstructure:"loggerName"`
+	DisableAccessLog bool            `mapstructure:"disableAccessLog"`
+	LogRequestInfo   bool            `mapstructure:"logRequestInfo"`
+	LogResponseInfo  bool            `mapstructure:"logResponseInfo"`
+	CORS             []ginx.CORSRule `mapstructure:"cors"`
 }
 
 // Gin 声明名为 http 的服务。Build 在启动阶段串行设置 Gin 模式，从入口配置同目录
@@ -55,13 +56,21 @@ func build(dir string, register func(*gin.Engine), modules []ginx.OpenAPIModule)
 
 	mode := env.RunMode()
 	gin.SetMode(mode)
-	engine, err := ginx.New(ginx.Config{
+	engineConfig := ginx.Config{
 		TrustedProxies:   cfg.TrustedProxies,
 		LoggerName:       cfg.LoggerName,
 		DisableAccessLog: cfg.DisableAccessLog,
 		LogRequestInfo:   cfg.LogRequestInfo,
 		LogResponseInfo:  cfg.LogResponseInfo,
-	})
+	}
+	if len(cfg.CORS) > 0 {
+		middleware, corsErr := ginx.NewCORS(cfg.CORS...)
+		if corsErr != nil {
+			return apprun.Service{}, fmt.Errorf("httpboot: configure CORS from %q: %w", ginPath, corsErr)
+		}
+		engineConfig.Middlewares = []gin.HandlerFunc{middleware}
+	}
+	engine, err := ginx.New(engineConfig)
 	if err != nil {
 		return apprun.Service{}, fmt.Errorf("httpboot: create Gin engine from %q: %w", ginPath, err)
 	}
