@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -349,6 +351,25 @@ func TestUploadURLMaps(t *testing.T) {
 }
 
 func TestUploadsWithLaggingReplica(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("HEAD /upload-bucket/files/lagged.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "7")
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client, err := ossx.New(ossx.Config{
+		Name:            "confirm",
+		Region:          "cn-shanghai",
+		Bucket:          "upload-bucket",
+		Endpoint:        server.URL,
+		AccessKeyID:     "test-id",
+		AccessKeySecret: "test-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
 	for _, backend := range []constant.Backend{constant.MySQL, constant.PostgreSQL} {
 		t.Run(string(backend), func(t *testing.T) {
 			ctx := t.Context()
@@ -373,8 +394,9 @@ func TestUploadsWithLaggingReplica(t *testing.T) {
 			}
 			const cdn = "https://cdn.example.com/assets"
 			uploads := Uploads{
-				store:  store,
-				config: Config{PublicBucketCDN: cdn},
+				store:   store,
+				config:  Config{PublicBucketCDN: cdn},
+				buckets: bucketServices{public: &Service{oss: client}},
 			}
 			records := []model.Record{
 				{
@@ -390,8 +412,8 @@ func TestUploadsWithLaggingReplica(t *testing.T) {
 			}
 			id := records[0].ID
 			req := model.OSSUploadConfirmRequest{Items: []model.OSSUploadConfirmItemRequest{{ID: id}}}
-			if err := uploads.Confirm(ctx, req); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("Confirm before replication = %v, want %v", err, ErrNotFound)
+			if err := uploads.Confirm(ctx, req); err != nil {
+				t.Fatalf("从库尚无记录时确认上传失败：%v", err)
 			}
 			ids := []uint64{id}
 			if got, err := uploads.DisplayURLMap(ctx, ids); err != nil || got == nil || len(got) != 0 {
@@ -407,8 +429,8 @@ func TestUploadsWithLaggingReplica(t *testing.T) {
 			if err := replica.Create(ctx, records); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.Confirm(ctx, records); err != nil {
-				t.Fatal(err)
+			if err := uploads.Confirm(ctx, req); !errors.Is(err, ErrState) {
+				t.Fatalf("从库仍为待确认时重复确认应返回 ErrState，得到 %v", err)
 			}
 			if got, err := uploads.AllCompleted(ctx, "files", []uint64{id}); got || err != nil {
 				t.Fatalf("从库仍为待确认时 AllCompleted 得到 %v, %v", got, err)

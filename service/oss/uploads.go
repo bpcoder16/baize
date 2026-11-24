@@ -298,7 +298,7 @@ func (s *Uploads) CreateToken(ctx context.Context, req model.OSSUploadTokenReque
 	return result, nil
 }
 
-// Confirm 核对 OSS 对象及实际大小，仅允许待确认记录在同一事务内变为成功。
+// Confirm 从主库读取上传记录，核对 OSS 对象及实际大小，仅允许待确认记录在同一事务内变为成功。
 func (s *Uploads) Confirm(ctx context.Context, req model.OSSUploadConfirmRequest) error {
 	if len(req.Items) == 0 || len(req.Items) > 100 {
 		return ErrParams
@@ -312,7 +312,7 @@ func (s *Uploads) Confirm(ctx context.Context, req model.OSSUploadConfirmRequest
 		seen[item.ID] = true
 		ids = append(ids, item.ID)
 	}
-	records, err := s.store.Find(ctx, ids)
+	records, err := s.store.FindOnMaster(ctx, ids)
 	if err != nil {
 		return err
 	}

@@ -1,333 +1,151 @@
 <p align="center">
-  <img src="assets/baize-logo.png" width="160" alt="白泽 Baize 吉祥物，月白身、玉青鬃、额生双角">
+  <img src="assets/baize-logo.png" width="160" alt="白泽 Baize 吉祥物">
 </p>
 
 <h1 align="center">白泽 · Baize</h1>
 
 <p align="center">
   <a href="go.mod"><img src="https://img.shields.io/badge/Go-1.27.3%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.27.3+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" alt="许可证 Apache-2.0"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" alt="Apache License 2.0"></a>
 </p>
 
-白泽（bái zé，Baize）是基于 Pixiu 的 Go 业务复用库，在同一处维护多个应用共用的启动流程和业务代码。Pixiu 提供日志、数据库客户端、HTTP、Cron、NATS 等技术能力，业务项目保留自己的入口、部署配置和产品规则。[Pixiu 项目](https://github.com/bpcoder16/pixiu)
+**Baize 是基于 Pixiu 的 Go 业务复用库。** 如果你的多个应用都需要验证请求身份、确认文件上传，或在数据库事务提交后可靠地发送消息，可以直接接入对应的业务包。Baize 也提供统一的启动入口，让 HTTP 服务、定时任务和消息消费者共用一套配置、日志和停机流程。
 
-项目以传说中能言、通晓万物的神兽白泽命名。吉祥物月白身、玉青鬃，与 Pixiu、Qilin 同为昂首坐姿。
+Pixiu 提供数据库连接、WebSocket、NATS 等基础组件。Baize 在这些组件上实现业务流程，应用负责自己的路由、权限规则和部署配置。[Pixiu 项目](https://github.com/bpcoder16/pixiu)
 
-## 项目状态
+## 可以用它做什么
 
-当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务装配支持 Realtime WebSocket、Gin HTTP、Cron，以及按 NATS 实例声明的 Core 和 JetStream 消费者。Baize 提供固定租期的单节点 Redis 锁，以及 JetStream Outbox 的事务登记、投递与补偿。
+| 需求 | Baize 提供的能力 | 从这里开始 |
+| --- | --- | --- |
+| 搭建 Go 服务 | 按清单初始化资源，运行 Gin HTTP、Cron、NATS 消费者或 WebSocket 服务，退出时排空请求并回收资源 | [快速开始](#快速开始) |
+| 接入 HTTP 认证 | 应用提供令牌校验函数，Gin 路由选择必须登录或允许游客访问，下游从请求上下文读取身份 | [认证契约](httpauth/doc.go) · [Gin 用法](middleware/ginauth/doc.go) |
+| 让客户端直传文件 | 按场景签发阿里云 OSS 临时凭据，核对对象、批量确认记录并生成访问地址，也支持服务端直接上传 | [OSS 接入指南](docs/oss-upload-integration.md) |
+| 可靠地发送业务事件 | 在写业务数据的同一事务中登记 Outbox 消息，提交后投递至 NATS JetStream，由 Cron 补偿待发任务 | [事务发件箱](#事务发件箱) |
+| 向在线客户端推送 | 通过 WebSocket 按用户、设备或 Topic 推送，按 `scene/action` 路由请求，支持 JSON 和 Protobuf | [会话与推送示例](service/realtime/doc.go) |
+| 避免多个任务同时处理同一资源 | 使用单节点 Redis 的固定租期锁，支持等待获取、单次尝试和一次获取多个键 | [锁的使用约定](service/lockx/doc.go) · [Redis 实现](service/lockx/redislock/doc.go) |
 
-## 按需接入 OSS 上传
+也可单独使用业务编号、时间格式化和姓名脱敏工具。例如 `display.MaskName("张三")` 返回 `张*`。业务编号带时间和随机尾号，需要唯一性时应在存储层设置唯一约束。[业务编号](bizid/doc.go) · [展示工具](display/doc.go)
 
-`ossboot.Prepare` 借用指定的 MySQL 或 PostgreSQL 主库、OSS 和 STS 实例，按必需的 `baize.oss.yaml` 场景配置管理 `baize_oss_upload_records`。装配完成后，宿主通过 `service/oss` 包的 `Default()` 取得上传服务，调用 `CreateToken`、`Confirm`、`DirectUpload` 和 `AllCompleted`。`DisplayURLMap` 和 `OriginURLMap` 分别批量生成展示地址和原始对象地址。鉴权及调用入口由宿主负责。[阿里云权限、数据库迁移与接入步骤](docs/oss-upload-integration.md)
+## 快速开始
 
-## 业务编号与展示
+下面用 Go 1.27.3 或更高版本启动一个返回 `hello` 的 HTTP 服务，无需数据库或云账号。示例固定使用 `v0.1.4`。接入本页的 HTTP 认证功能时，请选用包含 `httpauth` 的后续标签或提交。
 
-- `bizid.Generate("PD")` 生成带前缀的业务编号，沿用应用时区、毫秒时间和四位随机尾号。需要唯一编号的表应设置唯一索引并处理冲突。[业务编号文档](bizid/doc.go)
-- `display.FormatTime(t)` 按应用时区输出 RFC3339，空时间返回空字符串。`display.MaskName("张三")` 返回 `张*`。[展示规则文档](display/doc.go)
+**1. 创建项目并复制监听配置。** 在终端执行以下命令。模板来自安装的模块，默认监听 `127.0.0.1:8888`。
 
-## 初始化一个宿主
+```sh
+mkdir hello-baize
+cd hello-baize
+go mod init example.com/hello
+go get github.com/bpcoder16/baize/bootstrap/httpboot@v0.1.4
+mkdir conf
+baize_dir=$(go list -m -f '{{.Dir}}' github.com/bpcoder16/baize)
+cp "$baize_dir/conf.example/gin.yaml" "$baize_dir/conf.example/http.yaml" conf/
+```
 
-将 [app.yaml 模板](conf.example/app.yaml) 复制到宿主的 `conf/app.yaml`。最小入口如下。
+**2. 创建 `conf/app.yaml`。** 本例选择 `release` 模式，只注册业务路由。`debug` 和 `test` 模式还会加载应用生成的 Swag 接口文档。[完整配置模板](conf.example/app.yaml)
+
+```yaml
+env:
+  appName: "hello"
+  runMode: "release"
+  timeLocation: "Asia/Shanghai"
+log:
+  format: "json"
+  hookStd: false
+```
+
+**3. 创建 `main.go` 并启动服务。**
 
 ```go
 package main
 
 import (
-    "os"
+	"net/http"
+	"os"
 
-    "github.com/bpcoder16/baize/bootstrap"
+	"github.com/bpcoder16/baize/bootstrap"
+	"github.com/bpcoder16/baize/bootstrap/httpboot"
+	"github.com/gin-gonic/gin"
 )
+
+func routes(r *gin.Engine) {
+	r.GET("/hello", func(c *gin.Context) {
+		c.String(http.StatusOK, "hello\n")
+	})
+}
 
 func main() {
-    os.Exit(bootstrap.RunCLI(bootstrap.Plan{}))
+	os.Exit(bootstrap.RunCLI(bootstrap.Plan{
+		Services: []bootstrap.Service{httpboot.Gin(routes)},
+	}))
 }
 ```
 
-在宿主目录运行 `go run .`，白泽读取配置并初始化环境、时区和日志，写入“白泽初始化完成”后关闭日志并退出。`go run . --conf /etc/cards/staging.yaml` 可指定其他文件，短参数为 `-c`，`go run . -h` 显示帮助。
+运行 `go run .`，在另一个终端执行 `curl http://127.0.0.1:8888/hello`，应收到 `hello`。按 Ctrl+C 结束服务。默认入口配置是 `./conf/app.yaml`，也可用 `go run . --conf /path/to/app.yaml` 指定。
 
-环境在每个进程内只发布一次。配置检查工具可调用 `appconfig.Load(path)`。相对路径、兼容字段和初始化边界见[包说明](appconfig/doc.go)。
+## 把组件接入自己的应用
 
-## 按需接入 MySQL
+`bootstrap.Plan` 描述一个进程要使用哪些组件。上面的 HTTP 服务只用到了 `Services`。需要数据库或业务组件时，可以按启动顺序补上前两个阶段。
 
-在需要数据库的入口导入 `github.com/bpcoder16/baize/bootstrap/mysqlboot`，把 [MySQL 模板](conf.example/mysql.default.yaml) 复制为入口配置同目录下的 `mysql.orders.yaml`，填入连接参数。
-
-```go
-plan := bootstrap.Plan{
-    Resources: []bootstrap.Resource{
-        mysqlboot.Instances("orders"),
-    },
-    Prepare: []bootstrap.Step{
-        {
-            Name: "check-database",
-            Init: func(ctx context.Context, _ string, _ *lifecycle.Stack) error {
-                db := mysqlx.Named("orders").MasterDB(ctx)
-                return db.Exec("SELECT 1").Error
-            },
-        },
-    },
-}
-return bootstrap.Run(ctx, path, plan)
-```
-
-多实例在同一次调用中声明，如 `mysqlboot.Instances("orders", "audit")`。白泽先解析这一组的全部文件，再按顺序建连。这组实例作为一个资源步骤。`Run` 在每个资源步骤开始前检查取消。组内建连期间收到取消时，当前组会继续到全部打开或首次出错，随后回收已登记的资源。每个名字都用 `mysqlx.Named(name)` 访问，包括名为 `default` 的实例。只使用基础入口的程序可以独立构建，MySQL 驱动仅随显式依赖它的入口链接。
-
-宿主自己的初始化可以作为下一项 `bootstrap.Resource{Name: "billing", Init: app.openBilling}` 加入 `Plan.Resources`。回调签名为 `func(configDir string, resources *lifecycle.Stack) error`，执行时可借用前面步骤已就绪的句柄。从命名 YAML 创建客户端的适配器可复用 `bootstrap.NamedInstances`，提供 `func(configDir, name string, cfg *F) error` 形式的打开回调和统一关闭函数。每类命名客户端由一个步骤统一管理，借用方无需再登记关闭。
-
-## 按需接入 PostgreSQL、ClickHouse 和 SQLite
-
-从 `github.com/bpcoder16/baize/bootstrap/` 导入所需数据库的装配包，将实例声明加入 `Plan.Resources`。实例文件放在入口配置同目录，每种数据库可一次声明多个名称，例如 `postgresqlboot.Instances("orders", "audit")`。
-
-| 数据库 | 启动声明 | 业务中取得 GORM 会话 | 示例配置 |
-| --- | --- | --- | --- |
-| PostgreSQL | `postgresqlboot.Instances("default")` | `postgresqlx.Named("default").MasterDB(ctx)` | [postgresql.default.yaml](conf.example/postgresql.default.yaml) |
-| ClickHouse | `clickhouseboot.Instances("default")` | `clickhousex.Named("default").MasterDB(ctx)` | [clickhouse.default.yaml](conf.example/clickhouse.default.yaml) |
-| SQLite | `sqliteboot.Instances("default")` | `sqlitex.Named("default").DB(ctx)` | [sqlite.default.yaml](conf.example/sqlite.default.yaml) |
-
-业务客户端分别位于 Pixiu 的 `infra/postgresqlx`、`infra/clickhousex`、`infra/sqlitex`。PostgreSQL 沿用 Pixiu 的 `postgresql.<实例名>.yaml`，包括证书路径及 SQL 日志默认值。PostgreSQL 和 ClickHouse 都通过 `SlaveDB(ctx)` 轮询从库，省略从库时回到主库。ClickHouse 可选择 Native 或 HTTP 协议，开启 TLS 时使用系统 CA 校验对应节点。
-
-PostgreSQL 的 `sslRootCert`、`sslCert` 和 `sslKey` 填相对文件路径时，从进程工作目录解析。例如，在 `/srv/shop` 执行 `./shop --conf /etc/shop/app.yaml`，`sslRootCert: "certs/ca.pem"` 会读取 `/srv/shop/certs/ca.pem`。证书随配置部署在 `/etc/shop/certs/` 时，可直接填写绝对路径 `/etc/shop/certs/ca.pem`。
-
-SQLite 使用 CGO 驱动，构建该入口时需要启用 CGO 并安装 C 编译器。示例用 `:memory:` 创建单连接内存库，进程退出后数据释放。需要持久化时填写文件路径或 `file:` URI，并提前创建父目录。相对路径以进程工作目录为准。
-
-## 在 Prepare 中迁移 MySQL 和 PostgreSQL
-
-为需要迁移的实例声明步骤。实际迁表或执行种子时，主库须由对应的 `Instances` 在本次 `Plan.Resources` 中声明。宿主提供 `[]schemamigrate.Table`，可按数据库传入各自的模型和种子 SQL。以下示例仅迁移表结构。
-
-```go
-Prepare: []bootstrap.Step{
-    mysqlboot.PrepareMigration("default", mysqlTables, mysqlboot.SeedOptions{}),
-    postgresqlboot.PrepareMigration("default", pgTables, postgresqlboot.SeedOptions{}),
-},
-```
-
-声明步骤后，在入口配置同目录提供 `mysql-migrate.<实例名>.yaml` 或 `postgresql-migrate.<实例名>.yaml`。两份文件独立生效，`enabled` 默认关闭，同时控制迁表和种子。迁移 Biucards 旧配置时，将 `migrate.default.yaml` 改名为 `mysql-migrate.default.yaml`。[MySQL 模板](conf.example/mysql-migrate.default.yaml) · [PostgreSQL 模板](conf.example/postgresql-migrate.default.yaml)
-
-启用后，Pixiu 按清单迁表，成功后再执行种子。通过 `SeedOptions{Files: files, Seeds: seeds}` 提供内嵌 SQL 和种子清单。每个实例的 YAML `timeout` 是迁表和种子共用的总时限，默认 `5m`。种子使用迁表后剩余的时间，启动 context 提前取消时，两阶段均响应取消。任一步失败会中止启动，已经完成的表或已提交的种子项可能保留。
-
-每次部署只启用一个执行迁移的进程。种子按声明范围比较行数，数量一致时保留数据，数量不同时在单项事务中删除该范围并重新导入。`Charset` 和 `Collation` 仅用于 MySQL，种子 SQL 须适用于目标数据库。
-
-## 按需接入 Redis
-
-在 `Plan.Resources` 中加入 `redisboot.Instances("default")`，把 [Redis 模板](conf.example/redis.default.yaml) 复制到入口配置同目录，填入单节点 Redis 的地址和凭据。一个入口使用多个 Redis 时，在同一次调用中列出所有实例名，并为每个实例提供 `redis.<name>.yaml`。
-
-```go
-// 装配使用 github.com/bpcoder16/baize/bootstrap/redisboot。
-// 锁配置使用 github.com/bpcoder16/baize/service/lockx/redislock。
-plan := bootstrap.Plan{
-    Resources: []bootstrap.Resource{
-        mysqlboot.Instances("default"),
-        redisboot.Instances("default"),
-    },
-    Prepare: []bootstrap.Step{
-        redisboot.PrepareLock("default", "default", redislock.Config{}),
-    },
-}
-```
-
-Redis 初始化时执行 `PING`。业务准备和服务中通过 `redisx.Named("default").Client()` 借用客户端，执行命令时传入调用方的 `ctx`。从 Biucards 迁移时可沿用原有 Redis YAML，将宿主封装中的 `redisx.Default()` 改为按名称取实例。示例按 MySQL、Redis 的顺序建连，Redis 启动失败时，白泽会关闭已打开的连接池，最后关闭日志。
-
-`PrepareLock(name, redisName, cfg)` 在准备阶段复用 `redisName` 的连接池。该 Redis 实例须由 `redisboot.Instances` 在本次 `Plan.Resources` 中声明，并配置 `maxRetries: -1`。业务通过 `lockx.Named(name)` 取得执行器。
-
-业务导入 `github.com/bpcoder16/baize/service/lockx`。例如，`lockx.Named("default").TryDoMany(ctx, keys, work)` 在取得整组锁后执行一次回调，竞争失败返回 `false, nil`。单键等待和单次尝试分别使用 `Do` 和 `TryDo`。零值配置的租期为 1 分钟，阻塞获取最多等待 5 秒，重试间隔以 50 毫秒为基准。[锁契约](service/lockx/doc.go) · [Redis 实现](service/lockx/redislock/doc.go)
-
-从 Pixiu 迁移的宿主须一并切换锁配置、执行业务的入口、测试后端和注册代码。两个包各有进程级注册表，`PrepareLock("default", …)` 登记的执行器通过 Baize 的 `lockx.Named("default")` 取得。
-
-设置 `BAIZE_REDIS_TEST_ADDR` 后运行 `go test ./service/lockx/...` 可验证真实 Redis 上的互斥和租期。另设 `BAIZE_REDIS_TEST_ACL=1` 可验证批量锁遇到权限错误时的清理行为，该用例会在测试实例上创建并删除临时 ACL 用户。
-
-## 按需接入 NATS
-
-在 `Plan.Resources` 中加入 `natsboot.Instances("default")`，将 [NATS 配置模板](conf.example/nats.default.yaml) 放到入口配置同目录。多个逻辑实例在一次调用中声明，例如 `natsboot.Instances("default", "events")`，每个实例读取自己的 `nats.<实例名>.yaml`。同一集群的多个节点填在同一份文件的 `urls` 中。
-
-```go
-// 装配包为 github.com/bpcoder16/baize/bootstrap/natsboot。
-// 在资源就绪后的业务代码中，通过 github.com/bpcoder16/pixiu/infra/natsx 借用实例。
-client := natsx.Named("default")
-return client.Publish(ctx, "orders.created", data)
-```
-
-Core NATS 和 JetStream 共用该连接。向已有 Stream 发布并等待服务端确认时可用 `client.PublishJetStream(ctx, subject, data, messageID)`。客户端初始化只建立连接并创建 JetStream 上下文，使用 JetStream 发布时需要服务端启用 JetStream 并配置匹配主题的 Stream。客户端在资源栈关闭时统一排空。
-
-需要消费消息时，在 `Plan.Services` 中声明消费服务，实例名须由 `natsboot.Instances` 在本次 `Plan.Resources` 中声明。参数顺序与 Biucards 一致，分别是实例名、JetStream 注册表和 Core 注册表。每类可传 `nil` 表示无 Handler。
-
-```go
-natsboot.ConsumerService(
-    "default",
-    natsrouter.JetStreamRegistry,
-    natsrouter.CoreRegistry,
-)
-```
-
-每个实例只声明一个消费服务。`Build` 严格读取入口配置同目录的 `nats-register.<实例名>.yaml`，将 `streams[].consumers[].handler` 和 `coreConsumers[].handler` 分别绑定到对应注册表。注册名区分大小写。`Build` 预检整份声明，成功后由 `Run` 注册远端资源并启动订阅。Stream 支持 `create`、`upsert`、`existing`，Durable 可独立选择 `create` 或 `upsert`。命名空间和日志名取自连接配置。[订阅配置模板](conf.example/nats-register.default.yaml)
-
-设置 `queue` 时，`subscribers` 是每个实例的同组订阅数，默认 1，显式填写须为正整数。停机可中断正在等待的 Core 注册确认。
-
-在 `disabledServices` 加入 `"nats-consumer:default"` 可跳过该实例的消费装配，加入 `"nats-consumer"` 可禁用全部消费者。发布方仍可使用已声明的客户端。停机时先停收并排空在途消息，再由资源栈关闭连接。
-
-## 按需接入 Elasticsearch
-
-按集群主版本导入 `bootstrap/elasticsearchboot/v7`、`v8` 或 `v9`。例如，连接 Elasticsearch 8 时，入口只需导入对应的装配包：
-
-```go
-import esv8 "github.com/bpcoder16/baize/bootstrap/elasticsearchboot/v8"
-```
-
-将 `esv8.Instances("default")` 加入 `Plan.Resources`，并将 [Elasticsearch 模板](conf.example/elasticsearch.default.yaml) 复制为入口配置同目录下的 `elasticsearch.default.yaml`。同一集群的多个节点写入 `addresses`。启动时会通过 `GET /` 校验集群主版本。迁移旧配置时删除 `version` 字段，保留连接参数。`caCertFile` 的相对路径从该实例 YAML 所在目录解析。
-
-连接同一主版本的多个集群可用 `esv8.Instances("default", "archive")`。如果 `archive` 使用 v7，则同时导入 v7 和 v8，在一个资源步骤中声明 `elasticsearchboot.Instances(esv8.Named("default"), esv7.Named("archive"))`。每个实例各有一份 `elasticsearch.<实例名>.yaml`。
-
-```go
-// 资源就绪后，通过 github.com/bpcoder16/pixiu/infra/elasticsearchx 按名称借用客户端。
-client := elasticsearchx.Named("default")
-count, err := client.Count(ctx, "products", query)
-```
-
-## 按需接入阿里云 OSS、STS 和 ES 管理端
-
-从 `github.com/bpcoder16/baize/bootstrap/` 按需导入 `aliyunossboot`、`aliyunstsboot` 或 `aliyunesboot`。三个装配包可独立使用。
-
-```go
-plan := bootstrap.Plan{
-    Resources: []bootstrap.Resource{
-        aliyunossboot.Instances("default"),
-        aliyunstsboot.Instances("oss"),
-        aliyunesboot.Instances("search-control"),
-    },
-}
-```
-
-| 客户端 | 入口配置同目录下的实例文件 | 业务中获取客户端 |
+| 阶段 | 放什么 | 例子 |
 | --- | --- | --- |
-| OSS | [aliyunossx.default.yaml](conf.example/aliyunossx.default.yaml) | `ossx.Named("default")` |
-| STS | [aliyunstsx.oss.yaml](conf.example/aliyunstsx.oss.yaml) | `stsx.Named("oss")` |
-| ES 管理端 | [aliyunesx.search-control.yaml](conf.example/aliyunesx.search-control.yaml) | `esx.Named("search-control")` |
+| `Resources` | 进程共享的客户端，按声明顺序打开 | `mysqlboot.Instances("orders")` 读取 `mysql.orders.yaml`，业务通过 Pixiu 的 `mysqlx.Named("orders")` 借用连接 |
+| `Prepare` | 依赖客户端的准备工作 | 迁移表结构，装配上传服务，或向 Cron 登记 Outbox 补偿任务 |
+| `Services` | 需要持续运行的服务 | `httpboot.Gin(routes)`、`cronboot.Service(registry)`、`natsboot.ConsumerService(name, js, core)` |
 
-业务端从 `github.com/bpcoder16/pixiu/infra/aliyun/` 下对应的 `ossx`、`stsx` 或 `esx` 包按名称取得客户端。每个 OSS 实例绑定一个 Bucket。多个桶可一次声明，例如 `aliyunossboot.Instances("geca-public", "geca-private")`，每个实例各配一份 YAML。已有 Pixiu 或 Biucards 项目可以沿用同名实例文件。
+启动代码从 `bootstrap/` 导入所需的装配包，业务代码按需调用 `service/oss`、`service/outbox` 等包。查找某项功能的数据结构和持久化实现时，分别看 `model/` 和 `repository/` 下的同名目录。
 
-启动时在本地构造客户端。访问 OSS 时使用该实例配置的凭据。需要签发临时凭据时，业务调用 `stsx.Named("oss").AssumeRole(ctx, req)`，在请求中指定角色 ARN、有效期和可选策略。
+资源配置和服务配置都放在入口配置文件的同一目录。同类资源有多个实例时，在一次 `Instances("orders", "audit")` 调用中声明，每个实例各有一份配置。命令行程序用 `bootstrap.RunCLI(plan)`，已有 `context.Context` 的程序可直接调用 `bootstrap.Run(ctx, path, plan)`。
 
-每个 ES 管理端名称绑定配置中的一个阿里云 `instanceID`。业务可调用 `esx.Named("search-control").DescribeInstance(ctx)` 查询该实例，也可通过同一客户端管理同义词词典。索引和文档读写使用上一节的 Elasticsearch 数据客户端。
+一次性任务可以只声明 `Resources` 和 `Prepare`，执行完成后自动退出。常驻服务收到停机信号时，先停收并排空，再逆序关闭资源，最后关闭日志。`app.yaml` 的 `disabledServices` 可以按类型或实例停用服务，例如 `nats-consumer:orders`。服务排空和资源关闭各有独立时限，默认各 30 秒。[应用配置](appconfig/doc.go) · [启动清单](bootstrap/plan.go)
 
-## HTTP 路由认证
+### 配置与适配器
 
-在 Gin 的路由注册回调中，将宿主的令牌验证函数绑定到一个方案。示例中的 `verifyApp` 接收 `context.Context` 和令牌，校验成功时返回 `httpauth.Principal{UserID: id}, nil`。凭证无效时返回或包装 `httpauth.ErrInvalidCredentials`，数据库等依赖故障保留原始错误。
+| 组件 | 配置与接入 |
+| --- | --- |
+| 数据库 | [MySQL](conf.example/mysql.default.yaml) · [PostgreSQL](conf.example/postgresql.default.yaml) · [ClickHouse](conf.example/clickhouse.default.yaml) · [SQLite](conf.example/sqlite.default.yaml)。SQLite 使用 CGO 驱动，构建时需要 C 编译器。 |
+| 迁表与种子数据 | MySQL 和 PostgreSQL 均可在 `Prepare` 阶段执行迁移。每次部署由一个进程开启迁移。使用种子数据时，指定范围内的行数与预期不符会触发该范围的删除与重新导入。[MySQL 迁移](conf.example/mysql-migrate.default.yaml) · [PostgreSQL 迁移](conf.example/postgresql-migrate.default.yaml) |
+| Redis 与业务锁 | `redisboot.PrepareLock(name, redisName, cfg)` 借用已声明的 Redis 实例。用于锁的连接须配置 `maxRetries: -1`，业务通过 `lockx.Named(name)` 取得执行器。[Redis 配置](conf.example/redis.default.yaml) |
+| NATS 与 JetStream | 一个命名连接可用于 Core 和 JetStream 发布。需要消费时，每个实例声明一个消费服务，在订阅配置中按名称绑定 Handler。[连接配置](conf.example/nats.default.yaml) · [订阅配置](conf.example/nats-register.default.yaml) |
+| HTTP、Cron 与 WebSocket | HTTP 监听和 Gin 中间件分别配置。Cron 支持固定间隔、Cron 表达式和随机间隔，Realtime 使用独立监听地址。[HTTP](conf.example/http.yaml) · [Gin](conf.example/gin.yaml) · [Cron](conf.example/cron.yaml) · [Realtime](conf.example/realtime.app.yaml) |
+| Elasticsearch | 按集群主版本导入 `bootstrap/elasticsearchboot/v7`、`v8` 或 `v9`，启动时校验版本。[连接配置](conf.example/elasticsearch.default.yaml) |
+| 阿里云 | 按需声明对象存储、临时凭据或 Elasticsearch 管理端客户端。每个 OSS 实例绑定一个 Bucket。[OSS](conf.example/aliyunossx.default.yaml) · [STS](conf.example/aliyunstsx.oss.yaml) · [ES 管理端](conf.example/aliyunesx.search-control.yaml) |
 
-```go
-app := ginauth.New("app", httpauth.Bearer(verifyApp), nil)
-router.GET("/me", app.Require(), me)
-router.GET("/feed", app.Optional(), feed)
-```
+### 事务发件箱
 
-内置 Bearer 认证器自动生成 `WWW-Authenticate: Bearer realm="api"`。需要为管理后台指定独立保护域时，使用 `httpauth.BearerWithRealm("admin", verifyAdmin)`。自定义认证器可通过 `Authenticator.Challenge` 声明对应协议的响应头值。
+例如，创建订单后需要发布 `orders.created`。在写入订单的同一个数据库事务中调用 `outbox.EnqueueJetStreamTx`，事务回滚时消息也一起回滚。最外层事务提交后，可用 `outbox.SendJetStream` 主动投递，也可以交给 Cron 补偿。消费端应按业务事件做幂等处理。[事务内登记与提交后发送示例](service/outbox/doc.go)
 
-在 handler 或下游服务中调用 `httpauth.PrincipalFromContext(ctx)`，一次读取用户 ID 和认证方案。只有缺少 Authorization 头才允许可选路由以游客身份继续。空头、重复头和无效令牌都会中止请求。默认凭证错误返回 HTTP 401 和认证挑战头，依赖故障返回 HTTP 500。需要业务响应格式时，在 `ginauth.New` 的第三个参数传入失败回调。宿主也可提供自己的 Cookie 或签名认证器。[认证契约](httpauth/doc.go) · [Gin 中间件](middleware/ginauth/doc.go)
-
-## Realtime 会话与推送
-
-`service/realtime` 基于 Pixiu 的 `infra/websocketx` 管理会话，按 `scene/action` 路由请求，并按用户、设备或 Topic 推送。宿主通过 `realtime.NewServer` 注入认证与路由。将 `realtimeboot.Service("app", newAppServer)` 加入 `Plan.Services`，由白泽统一管理独立 HTTP 监听和已升级的连接。[调用示例](service/realtime/doc.go)
-
-服务启用时读取入口配置同目录的 `realtime.app.yaml`，工厂返回全新实例，登记后业务可用 `realtime.Named("app")` 推送。默认示例的升级路径为 `/ws/app`，`GET /ready/ws` 在服务就绪时返回 204。在 `disabledServices` 中填 `realtime` 可禁用整组，填 `realtime:app` 可禁用单个实例。[监听配置](conf.example/realtime.app.yaml)
-
-客户端握手时提供 `baize.realtime.v1.json` 或 `baize.realtime.v1.protobuf`。Go 宿主从 `github.com/bpcoder16/baize/service/realtime/protocol` 导入公共信封类型，Protobuf 包名为 `baize.realtime.v1`。[公共信封](service/realtime/protocol/realtime.proto)
-
-## 业务准备与常驻服务
+下面的清单使用名为 `orders` 的 MySQL 实例和名为 `events` 的 NATS 实例，每 10 秒补偿一次。接入前配置好目标 Stream，在入口配置同目录准备 `mysql.orders.yaml`、`mysql-migrate.orders.yaml`、`nats.events.yaml` 和 `cron.yaml`。首次建表时在一个进程启用迁移。即使 `cron.yaml` 中的 `jobs` 为空，Outbox 在准备阶段登记的任务仍会运行。[装配参数](bootstrap/outboxboot/prepare.go)
 
 ```go
 plan := bootstrap.Plan{
-    Resources: []bootstrap.Resource{
-        mysqlboot.Instances("orders"),
-    },
-    Prepare: []bootstrap.Step{
-        mysqlboot.PrepareMigration("orders", app.Tables(), mysqlboot.SeedOptions{}),
-    },
-    Services: []bootstrap.Service{
-        httpboot.Gin(
-            router.Register,
-            ginx.OpenAPIModule{Name: "app", Title: "App"},
-            ginx.OpenAPIModule{Name: "admin", Title: "Admin"},
-        ),
-        cronboot.Service(cronrouter.Registry),
-    },
+	Resources: []bootstrap.Resource{
+		mysqlboot.Instances("orders"),
+		natsboot.Instances("events"),
+	},
+	Prepare: []bootstrap.Step{
+		outboxboot.PrepareJetStream(outboxboot.JetStreamConfig{
+			Backend:         constant.MySQL,
+			DatabaseName:    "orders",
+			ResourceNames:   []string{"events"},
+			CronTaskEvery:   10 * time.Second,
+			CronTaskTimeout: time.Minute,
+		}),
+	},
+	Services: []bootstrap.Service{cronboot.Service(nil)},
 }
-return bootstrap.Run(ctx, path, plan)
 ```
 
-Baize 内置准备步骤的 `Step.Name` 统一使用 `baize.` 前缀，例如 `baize.mysql-default-migrate` 和 `baize.jetstream-outbox`。
+**一张 Outbox 表可以向多个 JetStream Stream 投递，同一 Stream 的 Outbox 消息必须来自同一张表。** Baize 使用表内任务 ID 作为 `Nats-Msg-Id`，同一个 Stream 下的不同 Subject 共用去重窗口。两张表生成相同 ID 时，后一条业务消息可能被当作重复消息确认。[JetStream 发布约定](service/outbox/nats/doc.go)
 
-资源就绪后，先按声明顺序调用所有启用服务的 `BeforePrepare`，再依次执行 `Plan.Prepare`。全部步骤成功后，按相同的服务顺序调用 `AfterPrepare`，然后开始 `Build`。两个钩子均可省略，签名为 `func(context.Context) (context.Context, error)`。成功时将非空上下文传给后续钩子和阶段。任一钩子返回错误时立即停止启动，回收已登记的资源。返回的错误包含服务名和钩子名，调用方可用 `errors.Is` 或 `errors.As` 检查原始错误。Cron 通过 `BeforePrepare` 提供内置任务的登记入口。
+使用同一张表的副本应配置相同的发布目标。下线目标前，先停止向它登记消息，等该目标的待发任务清空后再移除。
 
-`Step.Init(ctx, configDir, resources)` 在资源就绪后按顺序执行。宿主可在这里迁移、加载业务配置、绑定处理函数。新增资源立即登记到栈。已有的资源初始化函数沿用 `Init(configDir, resources)` 签名，可自行设置连接超时。
+### OSS 上传
 
-Gin 宿主导入 `github.com/bpcoder16/baize/bootstrap/httpboot`，通过 `router.Register(*gin.Engine)` 挂载自己的路由。Demo 在 `internal/http/router` 按端注册路由，在 `internal/http/handler` 编写处理函数和各端的 Swag 注释。将两份模板放在入口配置同目录，`gin.yaml` 控制可信代理和访问日志，`http.yaml` 控制监听地址与读写超时。[Gin 模板](conf.example/gin.yaml) · [HTTP 模板](conf.example/http.yaml)
+需要应用内的文件上传时，使用 `ossboot.Prepare` 装配数据库、OSS 和 STS 客户端。应用校验用户身份及记录归属，`CreateToken` 按场景签发上传凭据。客户端直传后调用 `Confirm`，服务从主库读取记录、核对 OSS 对象并整批更新状态。需要写入后立即生成访问地址时，可使用 `DisplayURLMapOnMaster` 或 `OriginURLMapOnMaster`。[场景配置](conf.example/baize.oss.yaml) · [从授权到确认的完整流程](docs/oss-upload-integration.md)
 
-`gin.yaml` 可选的 `cors` 列表按路径前缀配置浏览器跨域访问。省略或留空时默认关闭；填写后由 `httpboot.Gin` 在构造 Engine 时挂载 Pixiu 中间件，业务路由只需注册实际方法。每条规则必须列举来源和方法，非法或重叠规则会在启动时报告配置文件和规则位置。
+## 开发与许可证
 
-在 debug/test 模式下，宿主需提前导入生成的 Swag 文档包，每个 `--instanceName` 与模块的 `Name` 对应。`/docs` 默认展示首个模块，`/docs/<Name>` 和 `/openapi/<Name>.json` 分别提供页面和 JSON。省略模块时使用 Swag 默认实例，JSON 位于 `/openapi/doc.json`。release 模式跳过文档注册。
+在仓库根目录运行 `go build ./...` 构建，运行 `go test ./...` 测试。需要在真实服务上验证时，将 `BAIZE_OUTBOX_MYSQL_DSN`、`BAIZE_OUTBOX_POSTGRESQL_DSN` 或 `BAIZE_REDIS_TEST_ADDR` 指向对应的测试实例。
 
-Cron 宿主导入 `github.com/bpcoder16/baize/bootstrap/cronboot`，通过 `cronx.MustNewHandlerRegistry` 登记签名为 `func(context.Context) error` 的包级函数。每个进程声明一个 Cron 服务，`cron.yaml` 的 `jobs` 按名称选择任务，名称区分大小写。每项可选固定间隔 `every`、六字段表达式 `cron`（从秒开始，使用应用时区）或随机间隔 `randomEvery`。固定间隔与随机下限至少为 `100ms`，随机上限须大于下限。[Cron 模板](conf.example/cron.yaml)
-
-设置 `jobs: []` 会停用 YAML 中配置的任务。准备步骤通过 `cronboot.AddJob` 登记的任务仍会运行，例如 JetStream Outbox 补偿。使用 `outboxboot.PrepareJetStream` 的宿主须启用 Cron，供该步骤登记补偿任务。
-
-多副本部署时，可在 `lock.redisName` 引用由 `redisboot.Instances` 在本次 `Plan.Resources` 中声明的实例。同组副本使用相同的 Redis 数据库、`keyPrefix` 和任务名，未获锁的副本跳过本轮。开启锁时每个任务须配置正的 `timeout`，超时会取消 Handler 的 context，任务实际返回后才解锁。
-
-`Service.Build(ctx, configDir)` 返回 `(apprun.Service, error)`。服务的名称以清单为准。全部构造成功后，Pixiu 并发运行服务。收到取消或任一服务退出时，先停收、排空全部服务，再逆序关闭资源和日志。服务回调支持在运行前停收，以便后续构造失败时回收。构造失败的步骤负责清理本次尚未移交的状态。
-
-`disabledServices` 在构造前按类型或完整名称过滤，允许的服务类型由 `constant.IsServiceType` 定义。没有声明服务时，业务准备完成即退出。声明的服务全部禁用时，返回 `apprun.ErrNoServices` 并跳过资源初始化。
-
-`serviceShutdownTimeout` 控制全部服务共用的停收及排空时限，默认 30 秒。超时后 Pixiu 通知尚未完成的服务取消，随后开始独立计算 `resourceCloseTimeout`（默认 30 秒）。单个 NATS 客户端的 `closeTimeout` 默认 20 秒，计入资源阶段。多个 NATS 实例逐个关闭，部署时应为其他客户端和日志预留回收时间。`app.yaml` 的两个停机超时字段省略或写 `0s` 时使用默认值，负值报错。
-
-应用和实例配置中的超时建议写明单位，例如 `"30s"` 或 `"500ms"`。YAML 整数按纳秒解析，`resourceCloseTimeout: 30` 表示 30 纳秒，要设置 30 秒应写 `resourceCloseTimeout: "30s"`。
-
-`bootstrap.RunCLI(plan)` 解析命令行并接管 SIGINT、SIGTERM。宿主已有 context 时调用 `bootstrap.Run(ctx, path, plan)`。
-
-## 目标目录
-
-通用业务按调用方、业务流程和持久化分层。宿主在启动时导入对应的 Boot 包，处理业务时调用 Service。
-
-| 目录 | 职责 |
-| --- | --- |
-| `constant/`、`error/outbox/` | 定义数据库方言、发布类型、投递状态和共享错误。 |
-| `model/entity/<数据库>/<能力>/` | 每种方言独立定义 GORM 实体、表名、列类型和索引。例如 `mysql/oss/`、`postgresql/oss/`，Outbox 遵循同一约定。 |
-| `model/<能力>/` | 定义跨层使用的业务数据。`model/oss/` 放上传记录和服务请求、响应，`model/outbox/` 放任务、投递快照和消息正文。 |
-| `repository/outbox/` | 选择实体、迁表、事务插入、按类型扫描和清理、持锁读取与回写。各业务仓储可复用 `repository/internal/dbinit` 的会话校验和命名迁移锁。 |
-| `repository/oss/` | 按方言选择实体，负责上传表初始化、主库读写和批量确认。 |
-| `bootstrap/ossboot/`、`service/oss/` | Prepare 加载场景配置并打开仓储，Service 使用就绪的配置、仓储及云客户端执行上传。 |
-| `service/outbox/` | 提供业务入口，按类型登记 Worker，执行投递与补偿。 |
-| `service/outbox/nats/` | 按实例发布至 JetStream，以有效 PubAck 确认发送成功。 |
-| `bootstrap/outboxboot/` | 借用命名资源，初始化仓储和 Worker，将按类型执行的补偿任务接入宿主 Cron。 |
-
-## JetStream Outbox
-
-数据库和发布名单中的 NATS 实例都须通过对应的 `Instances` 在本次 `Plan.Resources` 中声明。在 `Plan.Prepare` 中选择数据库和发布实例，并配置补偿调度。以下配置每 10 秒触发一次，每轮最多运行 1 分钟。数据库也可选 `constant.PostgreSQL`。
-
-```go
-outboxboot.PrepareJetStream(outboxboot.JetStreamConfig{
-    Backend:         constant.MySQL,
-    DatabaseName:    "default",
-    ResourceNames:   []string{"events", "audit"},
-    CronTaskEvery:   10 * time.Second,
-    CronTaskTimeout: time.Minute,
-})
-```
-
-Outbox 沿用所选 MySQL 或 PostgreSQL 实例的迁移配置。首次部署或升级时，由一个进程设置 `enabled: true`，在数据库会话锁内创建或更新 `baize_outbox`。迁移完成后，普通副本设置 `enabled: false`，直接使用已有表。空表可正常启动，缺表或缺少模型所需列会在 Prepare 阶段报错。直接构造仓储时，通过 `StoreConfig.Client` 提供实现了 `MasterDB(ctx)` 和 `SlaveDB(ctx)` 的客户端。
-
-宿主须启用 Cron。Prepare 验证名单内的 NATS 实例可访问 JetStream，打开任务表后登记 `nats_jetstream` Worker 和补偿任务。同进程每种 Handler 类型最多登记一个 Worker。同库同 schema 的 Worker 可以共用该表，共用同一张表和类型的副本配置相同的发布名单。
-
-滚动新增发布目标时，先将目标追加到所有投递副本的名单，全部生效后再向它登记任务。下线目标时，先让所有生产端停止向它登记（包括通过名单首项选取默认目标的调用），待在途业务事务结束、该目标的 `pending` 数量归零后，再从各副本移除。副本遇到名单外的目标会将任务标为 `failed`。
-
-在写业务数据的同一个事务里调用 `outbox.EnqueueJetStreamTx(tx, outbox.JetStreamMessage{...})`。事务须从所选主库的同一个连接池开启，并使用配置的数据库和 schema。传入同方言的其他连接池返回 `ErrInvalidSession`。消息要求合法的 `Subject`、显式的 `Data` 和 `Header`，以及非零的 `ExpiresAt`。允许空数据和空 Header。Header 名须为合法 HTTP token，例如 `X-Trace-ID`，非法名称在入队时返回 `ErrInvalidArgument`。`ResourceName` 省略时使用名单首项。实际目标名称及 `handler_type=nats_jetstream` 随任务一起入库。事务上下文中的 `logId` 仅用于调试，缺失或超出两种数据库共同支持的文本范围时留空，业务事务可正常提交。
-
-最外层业务事务提交后，可调用 `outbox.SendJetStream(ctx, id)` 或 `outbox.SendAsyncJetStream(id)`。通用入口 `outbox.Send(ctx, handlerType, id)` 和 `outbox.SendAsync(handlerType, id)` 接收显式类型。重试沿用任务 ID 作为 `Nats-Msg-Id`，消费端仍需幂等。
-
-补偿任务 `baize.outbox.retry.nats_jetstream` 使用从库会话，每页扫描 200 条该类型的待发记录。未配置从库时由客户端使用主库。每次扫描先固定最大待发 ID。整轮超时后，同一 Worker 下次从最后尝试的 ID 之后继续。扫完上界后再从头重试。主动和补偿发送都在主库持锁读取并回写，补偿以主库状态复核从库候选。进度保存在 Worker 内存中，进程重启后从头扫描。多副本共用 Cron 的锁配置与任务名。
-
-临时发布错误留在 `pending`，过期或目标已移出名单的任务进入 `failed`。清理窗口内只清理该类型的终态。指定类型未登记时，同步入口返回 `ErrHandlerNotRegistered`，异步入口在调用方 panic。任务类型与 Worker 绑定的类型不一致时，发送返回或记录 `ErrHandlerTypeMismatch`，任务保持原状。
-
-单次发送的加锁、发布和回写共用一个 context。提交前取消时事务回滚并释放行锁，任务保留上次提交的状态、尝试次数和错误原因，后续补偿可以重试。
-
-数据库集成测试通过 `BAIZE_OUTBOX_MYSQL_DSN` 和 `BAIZE_OUTBOX_POSTGRESQL_DSN` 连接测试实例。设置后，在仓库根目录运行 `go test ./...`。
-
-## 许可证
-
-[Apache License 2.0](LICENSE)
+Baize 使用 Apache License 2.0。[许可证全文](LICENSE)

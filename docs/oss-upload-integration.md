@@ -91,7 +91,9 @@
 
 迁移开启时，Prepare 调用 `repository/oss.Open`，在数据库迁移锁内创建或更新 `baize_oss_upload_records`。迁移关闭时调用 `OpenExisting`，查询表的全部模型列并读取零行，空表可启动，缺表或缺列会报错。两个入口成功返回的 Store 都可以直接读写。直接构造 Store 时，将提供 `MasterDB(ctx)` 和 `SlaveDB(ctx)` 的客户端传给 `StoreConfig.Client`。
 
-确认上传时预读记录、检查上传是否全部完成、生成下载地址，均使用实例配置的从库。配置多个从库时轮询选择，未配置时使用主库。上传登记、确认状态写入和迁移使用主库。复制延迟期间，确认上传可能返回 `oss.ErrNotFound`，`AllCompleted` 可能返回 `false, nil`。批量取地址时，结果会省略从库尚未读到的 ID，并按从库当前可见的对象 Key 生成地址。
+上传登记和迁移使用主库。`Confirm` 从主库读取待确认记录，核对 OSS 对象后在主库事务中整批更新状态，因此客户端上传后即可确认。
+
+`AllCompleted`、`DisplayURLMap` 和 `OriginURLMap` 使用从库，配置多个从库时轮询选择，未配置时使用主库。复制延迟期间，`AllCompleted` 可能返回 `false, nil`，批量取地址会省略从库尚未读到的 ID，并按从库当前可见的对象 Key 生成地址。写入后需要立即取地址时，可使用对应的 `OnMaster` 方法。
 
 上传记录使用应用服务器时间，同批写入共用一个微秒精度的时间。MySQL 时间列为 `TIMESTAMP(6)`，连接的 `location` 和实际会话时区须一致。PostgreSQL 使用 `timestamptz`。待确认记录的 `confirmed_at` 为 `NULL`，确认时与 `updated_at` 一起写入，直传成功时三个时间一致。
 
