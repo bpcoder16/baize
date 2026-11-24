@@ -208,6 +208,20 @@ plan := bootstrap.Plan{
 
 每个 ES 管理端名称绑定配置中的一个阿里云 `instanceID`。业务可调用 `esx.Named("search-control").DescribeInstance(ctx)` 查询该实例，也可通过同一客户端管理同义词词典。索引和文档读写使用上一节的 Elasticsearch 数据客户端。
 
+## HTTP 路由认证
+
+在 Gin 的路由注册回调中，将宿主的令牌验证函数绑定到一个方案。示例中的 `verifyApp` 接收 `context.Context` 和令牌，校验成功时返回 `httpauth.Principal{UserID: id}, nil`。凭证无效时返回或包装 `httpauth.ErrInvalidCredentials`，数据库等依赖故障保留原始错误。
+
+```go
+app := ginauth.New("app", httpauth.Bearer(verifyApp), nil)
+router.GET("/me", app.Require(), me)
+router.GET("/feed", app.Optional(), feed)
+```
+
+内置 Bearer 认证器自动生成 `WWW-Authenticate: Bearer realm="api"`。需要为管理后台指定独立保护域时，使用 `httpauth.BearerWithRealm("admin", verifyAdmin)`。自定义认证器可通过 `Authenticator.Challenge` 声明对应协议的响应头值。
+
+在 handler 或下游服务中调用 `httpauth.PrincipalFromContext(ctx)`，一次读取用户 ID 和认证方案。只有缺少 Authorization 头才允许可选路由以游客身份继续。空头、重复头和无效令牌都会中止请求。默认凭证错误返回 HTTP 401 和认证挑战头，依赖故障返回 HTTP 500。需要业务响应格式时，在 `ginauth.New` 的第三个参数传入失败回调。宿主也可提供自己的 Cookie 或签名认证器。[认证契约](httpauth/doc.go) · [Gin 中间件](middleware/ginauth/doc.go)
+
 ## Realtime 会话与推送
 
 `service/realtime` 基于 Pixiu 的 `infra/websocketx` 管理会话，按 `scene/action` 路由请求，并按用户、设备或 Topic 推送。宿主通过 `realtime.NewServer` 注入认证与路由。将 `realtimeboot.Service("app", newAppServer)` 加入 `Plan.Services`，由白泽统一管理独立 HTTP 监听和已升级的连接。[调用示例](service/realtime/doc.go)

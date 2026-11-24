@@ -7,7 +7,7 @@ require (
 	github.com/alibabacloud-go/tea v1.5.3
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.6.1
-	github.com/bpcoder16/pixiu v0.2.12
+	github.com/bpcoder16/pixiu v0.3.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-co-op/gocron-redis-lock/v2 v2.2.1
 	github.com/go-co-op/gocron/v2 v2.23.0
