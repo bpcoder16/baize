@@ -20,8 +20,8 @@ func TestWorkersSendAndRetryOnlyTheirBoundType(t *testing.T) {
 			ctx := t.Context()
 			db := testdb.Open(t, backend)
 			s, err := repo.Open(ctx, repo.StoreConfig{
-				Backend:  backend,
-				MasterDB: db,
+				Backend: backend,
+				Client:  testdb.Client{Primary: db},
 			})
 			if err != nil {
 				t.Fatal(err)

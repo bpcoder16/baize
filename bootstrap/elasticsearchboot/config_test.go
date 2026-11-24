@@ -28,13 +28,13 @@ func TestFileConfig(t *testing.T) {
 	}
 	dir = t.TempDir()
 	cfg.CACertFile = "ca.pem"
-	if _, err := cfg.clientConfig(dir, "search"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("应保留 CA 文件读取错误，实际为 %v", err)
+	if _, clientErr := cfg.clientConfig(dir, "search"); !errors.Is(clientErr, os.ErrNotExist) {
+		t.Fatalf("应保留 CA 文件读取错误，实际为 %v", clientErr)
 	}
-	if err := os.WriteFile(filepath.Join(dir, cfg.CACertFile), nil, 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(filepath.Join(dir, cfg.CACertFile), nil, 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
-	if _, err := cfg.clientConfig(dir, "search"); err == nil {
+	if _, clientErr := cfg.clientConfig(dir, "search"); clientErr == nil {
 		t.Fatal("指定空 CA 文件时应报错")
 	}
 }

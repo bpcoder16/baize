@@ -1,11 +1,13 @@
 package cronboot
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
 
-	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
+	"github.com/bpcoder16/baize/bootstrap"
+	"github.com/bpcoder16/baize/constant"
 	"github.com/bpcoder16/pixiu/infra/redisx"
 	redislock "github.com/go-co-op/gocron-redis-lock/v2"
 	"github.com/go-co-op/gocron/v2"
@@ -18,8 +20,8 @@ type lockConfig struct {
 	RenewInterval time.Duration `mapstructure:"renewInterval"`
 }
 
-func (cfg lockConfig) locker() (gocron.Locker, error) {
-	if cfg.RedisName == "" || strings.TrimSpace(cfg.RedisName) != cfg.RedisName {
+func (cfg lockConfig) locker(ctx context.Context) (gocron.Locker, error) {
+	if !bootstrap.ValidNamePart(cfg.RedisName) {
 		return nil, errors.New("invalid redisName")
 	}
 	if cfg.KeyPrefix == "" || strings.TrimSpace(cfg.KeyPrefix) != cfg.KeyPrefix {
@@ -37,7 +39,7 @@ func (cfg lockConfig) locker() (gocron.Locker, error) {
 	if cfg.RenewInterval <= 0 || cfg.RenewInterval >= cfg.TTL {
 		return nil, errors.New("renewInterval must be positive and less than ttl")
 	}
-	client, err := instancekey.Lookup("Redis", cfg.RedisName, redisx.Named)
+	client, err := bootstrap.LookupDeclared(ctx, constant.ResourceRedis, cfg.RedisName, redisx.Named)
 	if err != nil {
 		return nil, err
 	}

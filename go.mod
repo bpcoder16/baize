@@ -4,8 +4,10 @@ go 1.27.3
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.50.0
+	github.com/alibabacloud-go/tea v1.5.3
 	github.com/alicebob/miniredis/v2 v2.40.0
-	github.com/bpcoder16/pixiu v0.2.9
+	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.6.1
+	github.com/bpcoder16/pixiu v0.2.12
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-co-op/gocron-redis-lock/v2 v2.2.1
 	github.com/go-co-op/gocron/v2 v2.23.0
@@ -32,9 +34,7 @@ require (
 	github.com/alibabacloud-go/debug v1.0.1 // indirect
 	github.com/alibabacloud-go/elasticsearch-20170613/v6 v6.4.1 // indirect
 	github.com/alibabacloud-go/sts-20150401/v2 v2.1.0 // indirect
-	github.com/alibabacloud-go/tea v1.5.3 // indirect
 	github.com/alibabacloud-go/tea-utils/v2 v2.0.9 // indirect
-	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.6.1 // indirect
 	github.com/aliyun/credentials-go v1.4.14 // indirect
 	github.com/andybalholm/brotli v1.2.7 // indirect
 	github.com/antithesishq/antithesis-sdk-go v0.8.0 // indirect

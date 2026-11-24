@@ -17,6 +17,10 @@
 
 当前支持按清单初始化资源、执行业务准备、构造和运行宿主服务，提供 MySQL、PostgreSQL、ClickHouse、SQLite、Redis、NATS、Elasticsearch、阿里云 OSS、STS 和 ES 管理端命名实例适配器。服务装配支持 Realtime WebSocket、Gin HTTP、Cron，以及按 NATS 实例声明的 Core 和 JetStream 消费者。Baize 提供固定租期的单节点 Redis 锁，以及 JetStream Outbox 的事务登记、投递与补偿。
 
+## 按需接入 OSS 上传
+
+`ossboot.Prepare` 借用指定的 MySQL 或 PostgreSQL 主库、OSS 和 STS 实例，按必需的 `baize.oss.yaml` 场景配置管理 `baize_oss_upload_records`。装配完成后，宿主通过 `service/oss` 包的 `Default()` 取得上传服务，调用 `CreateToken`、`Confirm`、`DirectUpload` 和 `AllCompleted`。`DisplayURLMap` 和 `OriginURLMap` 分别批量生成展示地址和原始对象地址。鉴权及调用入口由宿主负责。[阿里云权限、数据库迁移与接入步骤](docs/oss-upload-integration.md)
+
 ## 业务编号与展示
 
 - `bizid.Generate("PD")` 生成带前缀的业务编号，沿用应用时区、毫秒时间和四位随机尾号。需要唯一编号的表应设置唯一索引并处理冲突。[业务编号文档](bizid/doc.go)
@@ -68,7 +72,7 @@ return bootstrap.Run(ctx, path, plan)
 
 多实例在同一次调用中声明，如 `mysqlboot.Instances("orders", "audit")`。白泽先解析这一组的全部文件，再按顺序建连。这组实例作为一个资源步骤。`Run` 在每个资源步骤开始前检查取消。组内建连期间收到取消时，当前组会继续到全部打开或首次出错，随后回收已登记的资源。每个名字都用 `mysqlx.Named(name)` 访问，包括名为 `default` 的实例。只使用基础入口的程序可以独立构建，MySQL 驱动仅随显式依赖它的入口链接。
 
-宿主自己的初始化可以作为下一项 `bootstrap.Resource{Name: "billing", Init: app.openBilling}` 加入 `Plan.Resources`。回调签名为 `func(configDir string, resources *lifecycle.Stack) error`，执行时可借用前面步骤已就绪的句柄。后续同样从命名 YAML 创建客户端的适配器可复用 `bootstrap.NamedInstances`，提供打开单个实例和统一关闭的函数即可。每类命名客户端由一个步骤统一管理，借用方无需再登记关闭。
+宿主自己的初始化可以作为下一项 `bootstrap.Resource{Name: "billing", Init: app.openBilling}` 加入 `Plan.Resources`。回调签名为 `func(configDir string, resources *lifecycle.Stack) error`，执行时可借用前面步骤已就绪的句柄。从命名 YAML 创建客户端的适配器可复用 `bootstrap.NamedInstances`，提供 `func(configDir, name string, cfg *F) error` 形式的打开回调和统一关闭函数。每类命名客户端由一个步骤统一管理，借用方无需再登记关闭。
 
 ## 按需接入 PostgreSQL、ClickHouse 和 SQLite
 
@@ -88,7 +92,7 @@ SQLite 使用 CGO 驱动，构建该入口时需要启用 CGO 并安装 C 编译
 
 ## 在 Prepare 中迁移 MySQL 和 PostgreSQL
 
-为需要迁移的实例声明步骤，使用已在 `Plan.Resources` 打开的主库。宿主提供 `[]schemamigrate.Table`，可按数据库传入各自的模型和种子 SQL。以下示例仅迁移表结构。
+为需要迁移的实例声明步骤。实际迁表或执行种子时，主库须由对应的 `Instances` 在本次 `Plan.Resources` 中声明。宿主提供 `[]schemamigrate.Table`，可按数据库传入各自的模型和种子 SQL。以下示例仅迁移表结构。
 
 ```go
 Prepare: []bootstrap.Step{
@@ -123,7 +127,7 @@ plan := bootstrap.Plan{
 
 Redis 初始化时执行 `PING`。业务准备和服务中通过 `redisx.Named("default").Client()` 借用客户端，执行命令时传入调用方的 `ctx`。从 Biucards 迁移时可沿用原有 Redis YAML，将宿主封装中的 `redisx.Default()` 改为按名称取实例。示例按 MySQL、Redis 的顺序建连，Redis 启动失败时，白泽会关闭已打开的连接池，最后关闭日志。
 
-`PrepareLock(name, redisName, cfg)` 在准备阶段复用 `redisName` 的连接池，该 Redis 实例须配置 `maxRetries: -1`。业务通过 `lockx.Named(name)` 取得执行器。
+`PrepareLock(name, redisName, cfg)` 在准备阶段复用 `redisName` 的连接池。该 Redis 实例须由 `redisboot.Instances` 在本次 `Plan.Resources` 中声明，并配置 `maxRetries: -1`。业务通过 `lockx.Named(name)` 取得执行器。
 
 业务导入 `github.com/bpcoder16/baize/service/lockx`。例如，`lockx.Named("default").TryDoMany(ctx, keys, work)` 在取得整组锁后执行一次回调，竞争失败返回 `false, nil`。单键等待和单次尝试分别使用 `Do` 和 `TryDo`。零值配置的租期为 1 分钟，阻塞获取最多等待 5 秒，重试间隔以 50 毫秒为基准。[锁契约](service/lockx/doc.go) · [Redis 实现](service/lockx/redislock/doc.go)
 
@@ -144,7 +148,7 @@ return client.Publish(ctx, "orders.created", data)
 
 Core NATS 和 JetStream 共用该连接。向已有 Stream 发布并等待服务端确认时可用 `client.PublishJetStream(ctx, subject, data, messageID)`。客户端初始化只建立连接并创建 JetStream 上下文，使用 JetStream 发布时需要服务端启用 JetStream 并配置匹配主题的 Stream。客户端在资源栈关闭时统一排空。
 
-需要消费消息时，在 `Plan.Services` 中声明对应实例的服务。参数顺序与 Biucards 一致，分别是实例名、JetStream 注册表和 Core 注册表。每类可传 `nil` 表示无 Handler。
+需要消费消息时，在 `Plan.Services` 中声明消费服务，实例名须由 `natsboot.Instances` 在本次 `Plan.Resources` 中声明。参数顺序与 Biucards 一致，分别是实例名、JetStream 注册表和 Core 注册表。每类可传 `nil` 表示无 Handler。
 
 ```go
 natsboot.ConsumerService(
@@ -250,7 +254,7 @@ Cron 宿主导入 `github.com/bpcoder16/baize/bootstrap/cronboot`，通过 `cron
 
 设置 `jobs: []` 会停用 YAML 中配置的任务。准备步骤通过 `cronboot.AddJob` 登记的任务仍会运行，例如 JetStream Outbox 补偿。使用 `outboxboot.PrepareJetStream` 的宿主须启用 Cron，供该步骤登记补偿任务。
 
-多副本部署时，可在 `lock.redisName` 引用 `redisboot.Instances` 已声明的实例。同组副本使用相同的 Redis 数据库、`keyPrefix` 和任务名，未获锁的副本跳过本轮。开启锁时每个任务须配置正的 `timeout`，超时会取消 Handler 的 context，任务实际返回后才解锁。
+多副本部署时，可在 `lock.redisName` 引用由 `redisboot.Instances` 在本次 `Plan.Resources` 中声明的实例。同组副本使用相同的 Redis 数据库、`keyPrefix` 和任务名，未获锁的副本跳过本轮。开启锁时每个任务须配置正的 `timeout`，超时会取消 Handler 的 context，任务实际返回后才解锁。
 
 `Service.Build(ctx, configDir)` 返回 `(apprun.Service, error)`。服务的名称以清单为准。全部构造成功后，Pixiu 并发运行服务。收到取消或任一服务退出时，先停收、排空全部服务，再逆序关闭资源和日志。服务回调支持在运行前停收，以便后续构造失败时回收。构造失败的步骤负责清理本次尚未移交的状态。
 
@@ -266,19 +270,21 @@ Cron 宿主导入 `github.com/bpcoder16/baize/bootstrap/cronboot`，通过 `cron
 
 通用业务按调用方、业务流程和持久化分层。宿主在启动时导入对应的 Boot 包，处理业务时调用 Service。
 
-| 目录 | Outbox 中的职责 |
+| 目录 | 职责 |
 | --- | --- |
 | `constant/`、`error/outbox/` | 定义数据库方言、发布类型、投递状态和共享错误。 |
-| `model/entity/<数据库>/outbox/` | 分别定义 MySQL 和 PostgreSQL 的表结构与索引。 |
-| `model/outbox/` | 定义事务任务、记录、投递快照及 JetStream 消息正文。 |
+| `model/entity/<数据库>/<能力>/` | 每种方言独立定义 GORM 实体、表名、列类型和索引。例如 `mysql/oss/`、`postgresql/oss/`，Outbox 遵循同一约定。 |
+| `model/<能力>/` | 定义跨层使用的业务数据。`model/oss/` 放上传记录和服务请求、响应，`model/outbox/` 放任务、投递快照和消息正文。 |
 | `repository/outbox/` | 选择实体、迁表、事务插入、按类型扫描和清理、持锁读取与回写。各业务仓储可复用 `repository/internal/dbinit` 的会话校验和命名迁移锁。 |
+| `repository/oss/` | 按方言选择实体，负责上传表初始化、主库读写和批量确认。 |
+| `bootstrap/ossboot/`、`service/oss/` | Prepare 加载场景配置并打开仓储，Service 使用就绪的配置、仓储及云客户端执行上传。 |
 | `service/outbox/` | 提供业务入口，按类型登记 Worker，执行投递与补偿。 |
 | `service/outbox/nats/` | 按实例发布至 JetStream，以有效 PubAck 确认发送成功。 |
 | `bootstrap/outboxboot/` | 借用命名资源，初始化仓储和 Worker，将按类型执行的补偿任务接入宿主 Cron。 |
 
 ## JetStream Outbox
 
-在 `Plan.Prepare` 中声明主库、发布实例和补偿调度。以下配置每 10 秒触发一次，每轮最多运行 1 分钟。数据库也可选 `constant.PostgreSQL`。
+数据库和发布名单中的 NATS 实例都须通过对应的 `Instances` 在本次 `Plan.Resources` 中声明。在 `Plan.Prepare` 中选择数据库和发布实例，并配置补偿调度。以下配置每 10 秒触发一次，每轮最多运行 1 分钟。数据库也可选 `constant.PostgreSQL`。
 
 ```go
 outboxboot.PrepareJetStream(outboxboot.JetStreamConfig{
@@ -290,7 +296,7 @@ outboxboot.PrepareJetStream(outboxboot.JetStreamConfig{
 })
 ```
 
-Outbox 沿用所选 MySQL 或 PostgreSQL 实例的迁移配置。首次部署或升级时，由一个进程设置 `enabled: true`，在数据库会话锁内创建或更新 `baize_outbox`。迁移完成后，普通副本设置 `enabled: false`，直接使用已有表。空表可正常启动，缺表会在 Prepare 阶段报错。
+Outbox 沿用所选 MySQL 或 PostgreSQL 实例的迁移配置。首次部署或升级时，由一个进程设置 `enabled: true`，在数据库会话锁内创建或更新 `baize_outbox`。迁移完成后，普通副本设置 `enabled: false`，直接使用已有表。空表可正常启动，缺表或缺少模型所需列会在 Prepare 阶段报错。直接构造仓储时，通过 `StoreConfig.Client` 提供实现了 `MasterDB(ctx)` 和 `SlaveDB(ctx)` 的客户端。
 
 宿主须启用 Cron。Prepare 验证名单内的 NATS 实例可访问 JetStream，打开任务表后登记 `nats_jetstream` Worker 和补偿任务。同进程每种 Handler 类型最多登记一个 Worker。同库同 schema 的 Worker 可以共用该表，共用同一张表和类型的副本配置相同的发布名单。
 
@@ -300,7 +306,7 @@ Outbox 沿用所选 MySQL 或 PostgreSQL 实例的迁移配置。首次部署或
 
 最外层业务事务提交后，可调用 `outbox.SendJetStream(ctx, id)` 或 `outbox.SendAsyncJetStream(id)`。通用入口 `outbox.Send(ctx, handlerType, id)` 和 `outbox.SendAsync(handlerType, id)` 接收显式类型。重试沿用任务 ID 作为 `Nats-Msg-Id`，消费端仍需幂等。
 
-补偿任务 `baize.outbox.retry.nats_jetstream` 每页扫描 200 条该类型的待发记录。每次扫描先固定最大待发 ID。整轮超时后，同一 Worker 下次从最后尝试的 ID 之后继续。扫完上界后再从头重试，期间新增的任务也在下一遍处理。进度保存在 Worker 内存中，进程重启后从头扫描。多副本共用 Cron 的锁配置与任务名。
+补偿任务 `baize.outbox.retry.nats_jetstream` 使用从库会话，每页扫描 200 条该类型的待发记录。未配置从库时由客户端使用主库。每次扫描先固定最大待发 ID。整轮超时后，同一 Worker 下次从最后尝试的 ID 之后继续。扫完上界后再从头重试。主动和补偿发送都在主库持锁读取并回写，补偿以主库状态复核从库候选。进度保存在 Worker 内存中，进程重启后从头扫描。多副本共用 Cron 的锁配置与任务名。
 
 临时发布错误留在 `pending`，过期或目标已移出名单的任务进入 `failed`。清理窗口内只清理该类型的终态。指定类型未登记时，同步入口返回 `ErrHandlerNotRegistered`，异步入口在调用方 panic。任务类型与 Worker 绑定的类型不一致时，发送返回或记录 `ErrHandlerTypeMismatch`，任务保持原状。
 

@@ -37,7 +37,7 @@ func TestStoreLocationConfiguration(t *testing.T) {
 				db := testdb.Open(t, backend)
 				store, err := repo.Open(t.Context(), repo.StoreConfig{
 					Backend:  backend,
-					MasterDB: db,
+					Client:   testdb.Client{Primary: db},
 					Location: tc.location,
 				})
 				if err != nil {

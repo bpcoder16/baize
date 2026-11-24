@@ -36,8 +36,8 @@ func TestNamedDatabases(t *testing.T) {
 		file = "dsn: ':memory:'\njournalMode: WAL\n"
 	}
 	for name, data := range map[string][]byte{"memory": memory, "file": []byte(file)} {
-		if err := os.WriteFile(filepath.Join(dir, "sqlite."+name+".yaml"), data, 0o600); err != nil {
-			t.Fatal(err)
+		if writeErr := os.WriteFile(filepath.Join(dir, "sqlite."+name+".yaml"), data, 0o600); writeErr != nil {
+			t.Fatal(writeErr)
 		}
 	}
 	var resources lifecycle.Stack
@@ -53,26 +53,26 @@ func TestNamedDatabases(t *testing.T) {
 		}
 		db := sqlitex.Named("file").DB(t.Context())
 		var fk int
-		if err := db.Raw("PRAGMA foreign_keys").Scan(&fk).Error; err != nil || fk != 0 {
-			t.Fatalf("显式关闭外键应覆盖 DSN，实际为 %d, %v", fk, err)
+		if queryErr := db.Raw("PRAGMA foreign_keys").Scan(&fk).Error; queryErr != nil || fk != 0 {
+			t.Fatalf("显式关闭外键应覆盖 DSN，实际为 %d, %v", fk, queryErr)
 		}
-		if _, err := os.Stat(filepath.Join(dir, "local.db")); err != nil {
-			t.Fatal(err)
+		if _, statErr := os.Stat(filepath.Join(dir, "local.db")); statErr != nil {
+			t.Fatal(statErr)
 		}
 	}
 	db := sqlitex.Named("memory").DB(t.Context())
 	var value int
-	if err := db.Raw("SELECT 1").Scan(&value).Error; err != nil || value != 1 {
-		t.Fatalf("内存实例查询失败: %v", err)
+	if queryErr := db.Raw("SELECT 1").Scan(&value).Error; queryErr != nil || value != 1 {
+		t.Fatalf("内存实例查询失败: %v", queryErr)
 	}
 	pool, err := db.DB()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := resources.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := resources.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
-	if err := pool.PingContext(t.Context()); err == nil {
+	if pingErr := pool.PingContext(t.Context()); pingErr == nil {
 		t.Fatal("资源栈未关闭已创建的连接池")
 	}
 }

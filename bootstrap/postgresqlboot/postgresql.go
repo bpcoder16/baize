@@ -16,7 +16,7 @@ func Instances(names ...string) bootstrap.Resource {
 	return bootstrap.NamedInstances(constant.ResourcePostgreSQL, names, open, postgresqlx.CloseAll)
 }
 
-func open(name string, cfg *fileConfig) error {
+func open(_, name string, cfg *fileConfig) error {
 	_, err := postgresqlx.NewNamed(cfg.clientConfig(name))
 	return err
 }

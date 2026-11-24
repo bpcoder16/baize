@@ -2,6 +2,7 @@
 package testdb
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -22,6 +23,23 @@ import (
 type Database struct {
 	MySQL      *driver.Config
 	PostgreSQL *pgx.ConnConfig
+}
+
+// Client 用独立测试库模拟主从会话，未指定 Replica 时读取 Primary。
+type Client struct {
+	Primary *gorm.DB
+	Replica *gorm.DB
+}
+
+func (c Client) MasterDB(ctx context.Context) *gorm.DB {
+	return c.Primary.WithContext(ctx)
+}
+
+func (c Client) SlaveDB(ctx context.Context) *gorm.DB {
+	if c.Replica == nil {
+		return c.MasterDB(ctx)
+	}
+	return c.Replica.WithContext(ctx)
 }
 
 // Create 只创建随机命名的隔离库。测试结束时先回收后登记的业务连接，再删除该库。

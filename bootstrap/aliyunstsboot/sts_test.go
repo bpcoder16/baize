@@ -61,14 +61,14 @@ logRequests: false
 	}
 	var resources lifecycle.Stack
 	defer resources.Close()
-	err := Instances(names...).Init(dir, &resources)
+	initErr := Instances(names...).Init(dir, &resources)
 	if mode == "missing-secret" {
-		if err == nil || !strings.Contains(err.Error(), "aliyunstsx.backup.yaml") {
-			t.Fatalf("应报告凭据缺失的实例文件，实际为 %v", err)
+		if initErr == nil || !strings.Contains(initErr.Error(), "aliyunstsx.backup.yaml") {
+			t.Fatalf("应报告凭据缺失的实例文件，实际为 %v", initErr)
 		}
 		names = names[:1]
-	} else if err != nil {
-		t.Fatal(err)
+	} else if initErr != nil {
+		t.Fatal(initErr)
 	}
 	if calls.Load() != 0 {
 		t.Fatal("初始化时向 STS 发出了请求")

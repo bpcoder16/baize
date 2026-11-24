@@ -25,7 +25,7 @@ func Instances(names ...string) bootstrap.Resource {
 	return bootstrap.NamedInstances(constant.ResourceRedis, names, open, redisx.CloseAll)
 }
 
-func open(name string, cfg *fileConfig) error {
+func open(_, name string, cfg *fileConfig) error {
 	client, err := cfg.clientConfig(name)
 	if err != nil {
 		return err

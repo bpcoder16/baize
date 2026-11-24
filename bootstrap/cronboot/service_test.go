@@ -17,7 +17,6 @@ import (
 	"github.com/bpcoder16/baize/bootstrap/redisboot"
 	"github.com/bpcoder16/pixiu/infra/apprun"
 	"github.com/bpcoder16/pixiu/infra/cronx"
-	"github.com/bpcoder16/pixiu/infra/env"
 	"github.com/bpcoder16/pixiu/infra/redisx"
 	"github.com/bpcoder16/pixiu/lifecycle"
 )
@@ -50,11 +49,32 @@ func TestCronService(t *testing.T) {
 		}
 		return
 	}
-	if err := env.Init(env.Config{AppName: "test", RunMode: "test", TimeLocation: "UTC", ConfigDirPath: t.TempDir(), LocalIP: "127.0.0.1"}); err != nil {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeConfig(t, dir, "app.yaml", "env: {appName: test, runMode: test, timeLocation: UTC, localIP: 127.0.0.1}\nlog: {format: text, hookStd: false}\n")
+	server := miniredis.RunT(t)
+	redisConfig := fmt.Sprintf("host: %s\nport: %s\nmaxRetries: -1\n", server.Host(), server.Port())
+	writeConfig(t, dir, "redis.jobs.yaml", redisConfig)
+	writeConfig(t, dir, "redis.outside.yaml", redisConfig)
+	var external lifecycle.Stack
+	defer external.Close()
+	if err := redisboot.Instances("outside").Init(dir, &external); err != nil {
 		t.Fatal(err)
 	}
-	t.Run("配置与绑定", testBinding)
-	t.Run("Redis锁与排空", testLockAndDrain)
+	plan := bootstrap.Plan{
+		Resources: []bootstrap.Resource{redisboot.Instances("jobs")},
+		Prepare: []bootstrap.Step{{
+			Name: "check-cron",
+			Init: func(ctx context.Context, dir string, _ *lifecycle.Stack) error {
+				t.Run("配置与绑定", testBinding)
+				t.Run("Redis锁与排空", func(t *testing.T) { testLockAndDrain(t, ctx, dir, server) })
+				return nil
+			},
+		}},
+	}
+	if err := bootstrap.Run(t.Context(), filepath.Join(dir, "app.yaml"), plan); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testBinding(t *testing.T) {
@@ -87,6 +107,10 @@ func testBinding(t *testing.T) {
 			t.Fatalf("配置 %s 得到 %v", body, err)
 		}
 	}
+	writeConfig(t, dir, "cron.yaml", "lock: {redisName: cache.prod, keyPrefix: 'test:'}")
+	if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "invalid redisName") {
+		t.Fatalf("非法 redisName 应在查找实例前被拒绝，得到 %v", err)
+	}
 	writeConfig(t, dir, "cron.yaml", "jobs: [{name: Heartbeat, every: 1s}]")
 	if _, err := cronboot.Service(nil).Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "unknown handler") {
 		t.Fatalf("空注册表绑定已配置任务时得到 %v", err)
@@ -102,9 +126,9 @@ func testBinding(t *testing.T) {
 		{"jobs: [{name: Heartbeat, randomEvery: {min: 1s, max: 2s}, successLevel: debug}]", decl},
 	} {
 		writeConfig(t, dir, "cron.yaml", tc.body)
-		s, err := tc.decl.Build(t.Context(), dir)
-		if err != nil {
-			t.Fatal(err)
+		s, buildErr := tc.decl.Build(t.Context(), dir)
+		if buildErr != nil {
+			t.Fatal(buildErr)
 		}
 		if err := s.Stop(); err != nil {
 			t.Fatal(err)
@@ -118,14 +142,14 @@ func testBinding(t *testing.T) {
 	}
 }
 
-func testLockAndDrain(t *testing.T) {
-	server := miniredis.RunT(t)
-	dir := t.TempDir()
-	writeConfig(t, dir, "redis.jobs.yaml", fmt.Sprintf("host: %s\nport: %s\nmaxRetries: -1\n", server.Host(), server.Port()))
-	var resources lifecycle.Stack
-	defer resources.Close()
-	if err := redisboot.Instances("jobs").Init(dir, &resources); err != nil {
-		t.Fatal(err)
+func testLockAndDrain(t *testing.T, ctx context.Context, dir string, server *miniredis.Miniredis) {
+	t.Helper()
+	writeConfig(t, dir, "cron.yaml", "lock: {redisName: outside, keyPrefix: 'test:'}\njobs: []")
+	if svc, err := cronboot.Service(nil).Build(ctx, dir); err == nil {
+		svc.Cancel()
+		t.Fatal("已注册但本次未声明的 Redis 不应构造 Cron 锁")
+	} else if !strings.Contains(err.Error(), `redis instance "outside" is not declared`) {
+		t.Fatalf("应报告未声明的 Redis，得到 %v", err)
 	}
 	const lock = "lock: {redisName: jobs, keyPrefix: 'test:', ttl: 15s, renewInterval: 5s}\n"
 	const key = "test:Heartbeat"
@@ -142,13 +166,13 @@ func testLockAndDrain(t *testing.T) {
 	}, "Heartbeat")
 	decl := cronboot.Service(registry)
 	writeConfig(t, dir, "cron.yaml", lock+"jobs: [{name: Heartbeat, every: 100ms}]")
-	if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "timeout") {
+	if _, err := decl.Build(ctx, dir); err == nil || !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("带锁任务缺少 timeout 时得到 %v", err)
 	}
 	writeConfig(t, dir, "cron.yaml", lock+"jobs: [{name: Heartbeat, every: 100ms, timeout: 10s}]")
-	s, err := decl.Build(t.Context(), dir)
-	if err != nil {
-		t.Fatal(err)
+	s, buildErr := decl.Build(ctx, dir)
+	if buildErr != nil {
+		t.Fatal(buildErr)
 	}
 	defer func() {
 		s.Cancel()

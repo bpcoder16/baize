@@ -27,7 +27,7 @@ type fileConfig struct {
 	LogRequests     bool          `mapstructure:"logRequests"`
 }
 
-func open(name string, cfg *fileConfig) error {
+func open(_, name string, cfg *fileConfig) error {
 	_, err := esx.NewNamed(esx.Config{
 		Name:            name,
 		Region:          cfg.Region,

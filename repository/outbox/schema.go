@@ -7,6 +7,10 @@ import (
 	"gorm.io/gorm/schema"
 )
 
+type recordEntity interface {
+	mysqloutbox.Record | pgoutbox.Record
+}
+
 // 每次返回独立模型，避免 GORM 在并发事务间共享可写的字段值。
 func (s *Store) tableModel() schema.Tabler {
 	if s.cfg.Backend == constant.MySQL {

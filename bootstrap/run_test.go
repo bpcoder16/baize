@@ -181,7 +181,7 @@ func TestRunPlan(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		group := bootstrap.NamedInstances("sample", names, func(name string, _ *struct{}) error {
+		group := bootstrap.NamedInstances("sample", names, func(_, name string, _ *struct{}) error {
 			record("open " + name)
 			cancel()
 			return nil

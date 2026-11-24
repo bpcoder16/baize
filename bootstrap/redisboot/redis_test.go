@@ -98,14 +98,14 @@ func TestInstances(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	err := Instances("default", "session").Init(dir, &resources)
+	initErr := Instances("default", "session").Init(dir, &resources)
 	if mode == "second-fails" {
-		if err == nil || !strings.Contains(err.Error(), "redis.session.yaml") {
-			t.Fatalf("应在启动时报告第二个实例认证失败，实际为 %v", err)
+		if initErr == nil || !strings.Contains(initErr.Error(), "redis.session.yaml") {
+			t.Fatalf("应在启动时报告第二个实例认证失败，实际为 %v", initErr)
 		}
 	} else {
-		if err != nil {
-			t.Fatal(err)
+		if initErr != nil {
+			t.Fatal(initErr)
 		}
 		if err := redisx.Named("session").Client().Set(t.Context(), "example", "session", 0).Err(); err != nil {
 			t.Fatal(err)

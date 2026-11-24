@@ -19,7 +19,7 @@ func Instances(names ...string) bootstrap.Resource {
 	return bootstrap.NamedInstances(constant.ResourceMySQL, names, open, mysqlx.CloseAll)
 }
 
-func open(name string, cfg *fileConfig) error {
+func open(_, name string, cfg *fileConfig) error {
 	_, err := mysqlx.NewNamed(cfg.clientConfig(name))
 	return err
 }

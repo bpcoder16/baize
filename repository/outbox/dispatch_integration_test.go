@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/bpcoder16/baize/constant"
 	outboxerr "github.com/bpcoder16/baize/error/outbox"
+	"github.com/bpcoder16/baize/internal/testdb"
 	model "github.com/bpcoder16/baize/model/outbox"
 	repo "github.com/bpcoder16/baize/repository/outbox"
 	outbox "github.com/bpcoder16/baize/service/outbox"
@@ -70,6 +72,57 @@ func TestSendAndCronRounds(t *testing.T) {
 			if calls[id] != 2 {
 				t.Fatal("已成功任务再次执行")
 			}
+		}
+	})
+}
+
+func TestRetryPendingUsesReplicaAndSendsOnMaster(t *testing.T) {
+	eachDatabase(t, func(t *testing.T, base *repo.Store, primary *gorm.DB) {
+		ctx := t.Context()
+		backend := base.TestConfig().Backend
+		replicaStore, replica := liveStore(t, backend)
+		store, err := repo.OpenExisting(ctx, repo.StoreConfig{
+			Backend: backend,
+			Client:  testdb.Client{Primary: primary, Replica: replica},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		first := enqueue(t, store, primary)
+		second := enqueue(t, store, primary)
+		var delivered []int64
+		worker := testWorker(t, store, func(_ context.Context, delivery model.Delivery) error {
+			delivered = append(delivered, delivery.ID)
+			if !slices.Equal(delivery.Payload, task().Payload) {
+				t.Errorf("发送必须使用主库中的任务内容: %q", delivery.Payload)
+			}
+			return nil
+		})
+		if err := worker.RetryPending(ctx, 1); err != nil || len(delivered) != 0 {
+			t.Fatalf("待发扫描应等从库同步后再发现任务: %v, %v", delivered, err)
+		}
+		if err := worker.Send(ctx, first); err != nil || !slices.Equal(delivered, []int64{first}) {
+			t.Fatalf("主动发送应直接读取主库: %v, %v", delivered, err)
+		}
+
+		// 模拟从库同步了入队记录，还没有同步首次主动发送的结果。
+		replicated := task()
+		replicated.Payload = []byte("replica")
+		for _, want := range []int64{first, second} {
+			if got := enqueueTask(t, replicaStore, replica, replicated); got != want {
+				t.Fatalf("模拟同步的 ID 不一致: %d, 预期 %d", got, want)
+			}
+		}
+		if err := worker.RetryPending(ctx, 1); err != nil || !slices.Equal(delivered, []int64{first, second}) {
+			t.Fatalf("补偿应跳过主库已成功的记录并发送下一条: %v, %v", delivered, err)
+		}
+		row, err := store.TestReadRecord(ctx, second)
+		if err != nil || row.Status != constant.OutboxSucceeded || row.Attempts != 1 {
+			t.Fatalf("补偿结果应写回主库: %+v, %v", row, err)
+		}
+		row, err = replicaStore.TestReadRecord(ctx, second)
+		if err != nil || row.Status != constant.OutboxPending || row.Attempts != 0 {
+			t.Fatalf("从库记录应保持同步前的状态: %+v, %v", row, err)
 		}
 	})
 }

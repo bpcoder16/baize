@@ -16,7 +16,7 @@ import (
 )
 
 // Service 声明进程共用的 cron 服务，并保存注册表当前的任务清单。nil 表示无任务。
-// Build 从入口配置同目录读取 cron.yaml，按名称绑定任务，配置 lock 时借用已初始化的 Redis。
+// Build 从入口配置同目录读取 cron.yaml，按名称绑定任务，配置 lock 时借用本次 Plan.Resources 声明的 Redis。
 func Service(registry *cronx.HandlerRegistry) bootstrap.Service {
 	var handlers []cronx.NamedHandler
 	if registry != nil {
@@ -32,12 +32,12 @@ func Service(registry *cronx.HandlerRegistry) bootstrap.Service {
 			if state, ok := ctx.Value(jobsKey{}).(*preparedJobs); ok {
 				extra = state.jobs
 			}
-			return build(dir, handlers, extra)
+			return build(ctx, dir, handlers, extra)
 		},
 	}
 }
 
-func build(dir string, handlers []cronx.NamedHandler, extra []cronx.Job) (apprun.Service, error) {
+func build(ctx context.Context, dir string, handlers []cronx.NamedHandler, extra []cronx.Job) (apprun.Service, error) {
 	path := filepath.Join(dir, "cron.yaml")
 	cfg, err := configx.Parse[fileConfig](path)
 	if err != nil {
@@ -53,7 +53,7 @@ func build(dir string, handlers []cronx.NamedHandler, extra []cronx.Job) (apprun
 		LoggerName: cfg.LoggerName,
 	}
 	if cfg.Lock != nil {
-		options.Locker, err = cfg.Lock.locker()
+		options.Locker, err = cfg.Lock.locker(ctx)
 		if err != nil {
 			return apprun.Service{}, fmt.Errorf("cronboot: configure lock from %q: %w", path, err)
 		}

@@ -67,8 +67,8 @@ func handshakeServer(t *testing.T, reject bool) string {
 	}
 	t.Cleanup(func() { listener.Close() })
 	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
 			return
 		}
 		defer conn.Close()
@@ -132,8 +132,8 @@ func TestInstances(t *testing.T) {
 		}
 		clients = append(clients, client)
 	}
-	if err := resources.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := resources.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	for _, client := range clients {
 		if !client.Conn().IsClosed() {

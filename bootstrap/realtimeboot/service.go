@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 
 	"github.com/bpcoder16/baize/bootstrap"
-	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
 	"github.com/bpcoder16/baize/constant"
 	"github.com/bpcoder16/baize/service/realtime"
 	"github.com/bpcoder16/pixiu/infra/apprun"
@@ -35,7 +34,7 @@ func Service(name string, newServer func() (*realtime.Server, error)) bootstrap.
 	return bootstrap.Service{
 		Name: serviceName,
 		Build: func(_ context.Context, dir string) (apprun.Service, error) {
-			if !instancekey.Valid(name) || newServer == nil {
+			if !bootstrap.ValidNamePart(name) || newServer == nil {
 				return apprun.Service{}, fmt.Errorf("realtimeboot: %q requires a valid instance name and server factory", serviceName)
 			}
 			filename := filepath.Join(dir, "realtime."+name+".yaml")

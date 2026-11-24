@@ -33,7 +33,7 @@ func TestPrepareRequiresDeclaredJetStream(t *testing.T) {
 			}
 			var stack lifecycle.Stack
 			err := PrepareJetStream(testConfig("events")).Init(t.Context(), dir, &stack)
-			if err == nil || !strings.Contains(err.Error(), "not declared") {
+			if err == nil || !strings.Contains(err.Error(), `nats instance "events" is not declared`) {
 				t.Fatalf("应报告未声明的 NATS 实例，得到 %v", err)
 			}
 		})

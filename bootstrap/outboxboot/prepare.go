@@ -10,7 +10,7 @@ import (
 
 	"github.com/bpcoder16/baize/bootstrap"
 	"github.com/bpcoder16/baize/bootstrap/cronboot"
-	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
+	"github.com/bpcoder16/baize/bootstrap/internal/db"
 	"github.com/bpcoder16/baize/bootstrap/internal/migration"
 	"github.com/bpcoder16/baize/constant"
 	repo "github.com/bpcoder16/baize/repository/outbox"
@@ -18,15 +18,12 @@ import (
 	outboxnats "github.com/bpcoder16/baize/service/outbox/nats"
 	"github.com/bpcoder16/pixiu/infra/cronx"
 	"github.com/bpcoder16/pixiu/infra/env"
-	"github.com/bpcoder16/pixiu/infra/mysqlx"
 	"github.com/bpcoder16/pixiu/infra/natsx"
-	"github.com/bpcoder16/pixiu/infra/postgresqlx"
 	"github.com/bpcoder16/pixiu/lifecycle"
 	"github.com/bpcoder16/pixiu/logit"
-	"gorm.io/gorm"
 )
 
-// JetStreamConfig 选择业务主库、按优先顺序排列的发布实例，以及补偿任务的调度预算。
+// JetStreamConfig 选择业务数据库实例、按优先顺序排列的发布实例，以及补偿任务的调度预算。
 type JetStreamConfig struct {
 	Backend         constant.Backend
 	DatabaseName    string
@@ -36,12 +33,13 @@ type JetStreamConfig struct {
 }
 
 // PrepareJetStream 在共享资源就绪后装配默认 Outbox，首个资源是入队的默认目标。
+// 数据库和名单中的 NATS 实例须在本次 Plan.Resources 中声明。
 func PrepareJetStream(cfg JetStreamConfig) bootstrap.Step {
 	names := slices.Clone(cfg.ResourceNames)
 	return bootstrap.Step{
 		Name: "baize.jetstream-outbox",
 		Init: func(ctx context.Context, dir string, stack *lifecycle.Stack) error {
-			if (cfg.Backend != constant.MySQL && cfg.Backend != constant.PostgreSQL) || !instancekey.Valid(cfg.DatabaseName) {
+			if (cfg.Backend != constant.MySQL && cfg.Backend != constant.PostgreSQL) || !bootstrap.ValidNamePart(cfg.DatabaseName) {
 				return fmt.Errorf("invalid outbox database %q/%q", cfg.Backend, cfg.DatabaseName)
 			}
 			if len(names) == 0 {
@@ -62,7 +60,7 @@ func PrepareJetStream(cfg JetStreamConfig) bootstrap.Step {
 			if err != nil {
 				return err
 			}
-			master, err := masterDB(ctx, cfg.Backend, cfg.DatabaseName)
+			database, err := db.LookupClient(ctx, cfg.Backend, cfg.DatabaseName)
 			if err != nil {
 				return err
 			}
@@ -74,7 +72,7 @@ func PrepareJetStream(cfg JetStreamConfig) bootstrap.Step {
 			}
 			store, err := openStore(schemaCtx, repo.StoreConfig{
 				Backend:  cfg.Backend,
-				MasterDB: master,
+				Client:   database,
 				Location: env.TimeLocation(),
 			})
 			if err != nil {
@@ -110,33 +108,14 @@ func retryJob(cfg JetStreamConfig, worker *outbox.Worker) cronx.Job {
 	}
 }
 
-func masterDB(ctx context.Context, backend constant.Backend, name string) (*gorm.DB, error) {
-	if backend == constant.MySQL {
-		c, err := instancekey.Lookup(string(backend), name, mysqlx.Named)
-		if err != nil {
-			return nil, err
-		}
-		return c.MasterDB(ctx), nil
-	}
-	c, err := instancekey.Lookup(string(backend), name, postgresqlx.Named)
-	if err != nil {
-		return nil, err
-	}
-	return c.MasterDB(ctx), nil
-}
-
 // 逐个确认白名单实例属于本次 Plan，且当前账号可用 JetStream。
 func jetStreamClients(ctx context.Context, names []string) (map[string]*natsx.Client, error) {
 	clients := make(map[string]*natsx.Client, len(names))
-	declared := bootstrap.InstanceNames(ctx, constant.ResourceNATS)
 	for _, name := range names {
 		if len(name) > 64 {
 			return nil, fmt.Errorf("outbox resource name exceeds 64 bytes: %q", name)
 		}
-		if !slices.Contains(declared, name) {
-			return nil, fmt.Errorf("outbox JetStream resource %q is not declared", name)
-		}
-		client, err := instancekey.Lookup("NATS", name, natsx.Named)
+		client, err := bootstrap.LookupDeclared(ctx, constant.ResourceNATS, name, natsx.Named)
 		if err != nil {
 			return nil, err
 		}

@@ -84,8 +84,8 @@ func TestDatabaseToJetStreamRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			store, err := repo.Open(ctx, repo.StoreConfig{
-				Backend:  backend,
-				MasterDB: db,
+				Backend: backend,
+				Client:  testdb.Client{Primary: db},
 			})
 			if err != nil {
 				t.Fatal(err)

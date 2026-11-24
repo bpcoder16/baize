@@ -51,14 +51,14 @@ logRequests: false
 	}
 	var resources lifecycle.Stack
 	defer resources.Close()
-	err := Instances(names...).Init(dir, &resources)
+	initErr := Instances(names...).Init(dir, &resources)
 	if mode == "bad-bucket" {
-		if err == nil || !strings.Contains(err.Error(), "aliyunossx.private.yaml") {
-			t.Fatalf("应报告无效 Bucket 的实例文件，实际为 %v", err)
+		if initErr == nil || !strings.Contains(initErr.Error(), "aliyunossx.private.yaml") {
+			t.Fatalf("应报告无效 Bucket 的实例文件，实际为 %v", initErr)
 		}
 		names = names[:1]
-	} else if err != nil {
-		t.Fatal(err)
+	} else if initErr != nil {
+		t.Fatal(initErr)
 	}
 	var clients []*ossx.Client
 	for _, name := range names {

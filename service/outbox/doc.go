@@ -1,8 +1,8 @@
 // Package outbox 提供 JetStream 事务发件箱的业务入口。任务和业务写入在同一事务登记。
 // 提交后可以主动发送，可重试的失败由启动时装配的 Cron 补偿。
 //
-// 在 Plan.Prepare 中通过 outboxboot.PrepareJetStream 配置主库、有序发布资源、CronTaskEvery 和 CronTaskTimeout。
-// 启动时借用已声明的主库与 JetStream 实例，准备表并注册补偿任务。
+// 在 Plan.Prepare 中通过 outboxboot.PrepareJetStream 配置数据库实例、有序发布资源、CronTaskEvery 和 CronTaskTimeout。
+// 启动时借用已声明的数据库与 JetStream 实例，准备表并注册补偿任务。
 //
 //	var taskID int64
 //	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -43,7 +43,8 @@
 // 如需同步等待结果，使用 outbox.SendJetStream(ctx, taskID)。发送失败不能撤销已提交业务。
 //
 // baize.outbox.retry.nats_jetstream 按 CronTaskEvery 调度，整轮使用 CronTaskTimeout，每页 200 条。
-// Worker.RetryPending(ctx, batchSize) 按绑定的类型确定扫描上界、分页、持锁复核和清理范围。
+// Worker.RetryPending(ctx, batchSize) 使用从库会话按绑定类型查扫描上界和候选 ID，未配置从库时由客户端使用主库。
+// 主动和补偿发送都在主库持锁读取、复核及回写，状态尚未同步的任务以主库为准。
 // 按 ID 游标扫描到固定上界，每条任务在一次扫描中最多尝试一次。
 // 每条补偿尝试有 5 秒期限，也受整轮 context 的更早取消控制。单条超时后继续扫描后续任务。
 // 整轮取消后，同一 Worker 下次从最后尝试的 ID 之后继续。扫完上界后再从头重试并纳入新任务。
@@ -61,11 +62,12 @@
 // 主动发送与补偿发送均使用 FOR UPDATE NOWAIT；不同任务可并发发送。
 // 同一任务被锁时，Send 返回 ErrBusy，补偿跳过该任务。cronx 分布式锁协调补偿轮次。
 // 每次尝试的加锁、发布和回写共用同一个 context。提交前取消时，数据库回滚并释放行锁。
+// 入队的创建和更新时间，以及回写的更新和完成时间，均由应用服务器提供，同一次写入共用一个微秒精度的时间。
 // 持锁读取后按应用服务器时间判断过期。尝试次数、失败原因和状态一起提交，回滚时保留上次提交的值。
 // 已进入 MySQL 驱动的提交和回滚还受连接读写超时控制。
 // 数据库生成 int64 自增 ID，重复登记会生成新任务；重试沿用 ID，回写失败可能重发，消费者须幂等。
 // Prepare 沿用数据库实例的 enabled 开关。开启时在会话锁内迁移 baize_outbox，
-// 关闭时直接打开已有表，缺表会中止启动。同库同 schema 的 Worker 可以共用该表。
+// 关闭时检查已有表及模型所需列，缺表或缺列会中止启动。同库同 schema 的 Worker 可以共用该表。
 // 同表同类型的副本共享完整的资源清单。新增目标先在所有投递副本生效，再向它登记任务。
 // 移除目标先停写，等待在途业务事务结束且该目标的 pending 清空，再从清单移除。
 // 主动发送传错类型时返回 ErrHandlerTypeMismatch，任务保持原状。

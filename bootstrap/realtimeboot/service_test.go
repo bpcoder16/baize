@@ -73,18 +73,18 @@ func TestBuildValidation(t *testing.T) {
 }
 
 func TestListenFailureAndEarlyStop(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+	if listenErr != nil {
+		t.Fatal(listenErr)
 	}
 	defer listener.Close()
 	for _, early := range []bool{false, true} {
 		dir := t.TempDir()
 		name := uuid.New().String()
 		writeConfig(t, dir, "realtime."+name+".yaml", "addr: '"+listener.Addr().String()+"'\npath: /ws/app")
-		s, err := realtimeboot.Service(name, newServer).Build(t.Context(), dir)
-		if err != nil {
-			t.Fatal(err)
+		s, buildErr := realtimeboot.Service(name, newServer).Build(t.Context(), dir)
+		if buildErr != nil {
+			t.Fatal(buildErr)
 		}
 		t.Cleanup(s.Cancel)
 		if realtime.Named(name).Ready() {
@@ -125,8 +125,8 @@ func TestDrainInFlightHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := reserve.Addr().String()
-	if err := reserve.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := reserve.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	writeConfig(t, dir, "realtime."+name+".yaml", "addr: '"+addr+"'\npath: /ws/app")
 	s, err := realtimeboot.Service(name, func() (*realtime.Server, error) {
@@ -162,8 +162,8 @@ func TestDrainInFlightHandler(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	defer c.Close()
-	if err := c.WriteMessage(websocket.TextMessage, []byte(`{"kind":1,"requestId":"r","scene":"test","action":"block","data":{}}`)); err != nil {
-		t.Fatal(err)
+	if writeErr := c.WriteMessage(websocket.TextMessage, []byte(`{"kind":1,"requestId":"r","scene":"test","action":"block","data":{}}`)); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	var handlerCtx context.Context
 	select {
@@ -171,23 +171,23 @@ func TestDrainInFlightHandler(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("Handler 未进入")
 	}
-	if err := s.Stop(); err != nil {
-		t.Fatal(err)
+	if stopErr := s.Stop(); stopErr != nil {
+		t.Fatal(stopErr)
 	}
 	expired, endWait := context.WithCancel(ctx)
 	endWait()
-	if err := s.Wait(expired); !errors.Is(err, context.Canceled) || handlerCtx.Err() != nil {
-		t.Fatalf("等待在途 Handler 时 Wait=%v, Handler=%v", err, handlerCtx.Err())
+	if waitErr := s.Wait(expired); !errors.Is(waitErr, context.Canceled) || handlerCtx.Err() != nil {
+		t.Fatalf("等待在途 Handler 时 Wait=%v, Handler=%v", waitErr, handlerCtx.Err())
 	}
 	s.Cancel()
 	// Handler 报告被取消，排空结果应保留该回调失败。
-	if err := s.Wait(ctx); !errors.Is(err, websocketx.ErrDrainFailed) {
-		t.Fatal(err)
+	if waitErr := s.Wait(ctx); !errors.Is(waitErr, websocketx.ErrDrainFailed) {
+		t.Fatal(waitErr)
 	}
 	select {
-	case err := <-runDone:
-		if !errors.Is(err, websocketx.ErrDrainFailed) {
-			t.Fatal(err)
+	case runErr := <-runDone:
+		if !errors.Is(runErr, websocketx.ErrDrainFailed) {
+			t.Fatal(runErr)
 		}
 	case <-ctx.Done():
 		t.Fatal("取消后未排空")

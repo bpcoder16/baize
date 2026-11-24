@@ -71,7 +71,8 @@ func (w *Worker) SendAsync(id int64) {
 	}()
 }
 
-// RetryPending 只处理 Worker 绑定的类型，按 ID 分页补偿，再于 Store 当地 02:00 至 04:00 分批清理创建超过 30 天的终态任务。
+// RetryPending 在从库按 ID 分页扫描 Worker 绑定类型的待发任务，在主库复核并发送。
+// 随后于 Store 当地 02:00 至 04:00 分批清理创建超过 30 天的终态任务。
 // 每批清理前按 Store 时区检查当前时间；每条补偿尝试使用 5 秒期限，并受调用方取消控制。
 // batchSize 为查询页大小。整轮取消后从已尝试 ID 的下一条继续，扫完固定上界后再从头扫描。
 // 已锁任务跳过，发布失败或单条超时后继续。其他存储错误或本轮取消结束调用。
@@ -92,6 +93,7 @@ func (w *Worker) RetryPending(ctx context.Context, batchSize int) error {
 	scanErr := w.store.ResumePending(ctx, w.handlerType, batchSize, &cursor, func(id int64) error {
 		attemptCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
+		// 从库上的候选可能已在主库发送完毕，持锁后复核类型和状态。
 		taskErr, storageErr := w.send(attemptCtx, id, &w.handlerType)
 		if storageErr != nil {
 			// 单条超时可能表现为 GORM 返回期限错误，或 database/sql 已回滚事务。

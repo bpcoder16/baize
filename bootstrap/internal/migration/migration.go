@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/bpcoder16/baize/bootstrap"
-	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
 	"github.com/bpcoder16/pixiu/infra/configx"
 	"github.com/bpcoder16/pixiu/infra/schemamigrate"
 	"github.com/bpcoder16/pixiu/lifecycle"
@@ -29,6 +28,12 @@ type Config struct {
 
 // LoadConfig 读取命名实例的迁移策略，超时默认五分钟。
 func LoadConfig(dir, kind, name string) (Config, error) {
+	if !bootstrap.ValidNamePart(kind) {
+		return Config{}, fmt.Errorf("invalid migration kind %q", kind)
+	}
+	if !bootstrap.ValidNamePart(name) {
+		return Config{}, fmt.Errorf("invalid %s migration instance name %q", kind, name)
+	}
 	path := filepath.Join(dir, kind+"-migrate."+name+".yaml")
 	cfg, err := configx.Parse[Config](path)
 	if err != nil {
@@ -47,14 +52,11 @@ type masterClient interface {
 	MasterDB(context.Context) *gorm.DB
 }
 
-// Prepare 按数据库类型和实例名读取开关，启用后借用现有主库。
+// Prepare 按数据库类型和实例名读取开关，执行迁移时借用本次 Plan.Resources 声明的主库。
 func Prepare[T masterClient](kind, name string, tables []schemamigrate.Table, seeds SeedOptions, named func(string) T) bootstrap.Step {
 	return bootstrap.Step{
 		Name: "baize." + kind + "-" + name + "-migrate",
 		Init: func(ctx context.Context, dir string, _ *lifecycle.Stack) error {
-			if !instancekey.Valid(name) {
-				return fmt.Errorf("invalid %s migration instance name %q", kind, name)
-			}
 			cfg, err := LoadConfig(dir, kind, name)
 			if err != nil {
 				return err
@@ -68,7 +70,7 @@ func Prepare[T masterClient](kind, name string, tables []schemamigrate.Table, se
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
 			}
-			client, err := instancekey.Lookup(kind, name, named)
+			client, err := bootstrap.LookupDeclared(ctx, kind, name, named)
 			if err != nil {
 				return err
 			}

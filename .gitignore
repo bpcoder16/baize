@@ -17,4 +17,7 @@ tmp/
 
 # Documentation
 docs/
+!/docs/
+/docs/*
+!/docs/oss-upload-integration.md
 AGENTS.md

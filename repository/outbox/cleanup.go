@@ -40,7 +40,7 @@ func (s *Store) deleteFinishedBatch(db *gorm.DB, handlerType constant.OutboxHand
 	// READ COMMITTED 避免 InnoDB 在常规范围扫描中持有间隙锁。
 	err := db.Transaction(func(tx *gorm.DB) error {
 		// 查询和删除分别从同一筛选条件派生，删除时再次校验终态及时间。
-		eligible := s.clean(tx).Where("handler_type = ? AND status = ? AND created_at < ?", handlerType, state, cutoff).Session(&gorm.Session{})
+		eligible := tableSession(tx, s.table).Where("handler_type = ? AND status = ? AND created_at < ?", handlerType, state, cutoff).Session(&gorm.Session{})
 		batch := eligible
 		if s.cfg.Backend == constant.MySQL {
 			// 按清理索引顺序读取，避免 MySQL 先锁定全部候选行再排序。

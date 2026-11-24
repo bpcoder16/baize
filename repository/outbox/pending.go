@@ -14,15 +14,15 @@ type PendingCursor struct {
 	upper int64
 }
 
-// ResumePending 继续扫描同一 Store 和类型的待发任务。取消后保留进度，扫完后游标回到零值。
+// ResumePending 使用从库会话继续扫描同一 Store 和类型的待发任务。取消后保留进度，扫完后游标回到零值。
 // 调用期间由调用方独占 cursor。visit 返回错误时保留该行供下轮重试，整轮取消时则越过本次尝试。
 func (s *Store) ResumePending(ctx context.Context, handlerType constant.OutboxHandlerType, batchSize int, cursor *PendingCursor, visit func(int64) error) error {
 	if ctx == nil || batchSize <= 0 || cursor == nil || visit == nil {
 		return outboxerr.ErrInvalidArgument
 	}
-	db, masterErr := s.master(ctx)
-	if masterErr != nil {
-		return masterErr
+	db, sessionErr := s.session(ctx, DBClient.SlaveDB)
+	if sessionErr != nil {
+		return sessionErr
 	}
 	pending := db.Where("status = ? AND handler_type = ?", constant.OutboxPending, handlerType).Session(&gorm.Session{})
 	if cursor.after == cursor.upper {

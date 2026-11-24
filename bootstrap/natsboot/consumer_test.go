@@ -46,6 +46,69 @@ func TestConsumerService(t *testing.T) {
 		return
 	}
 	dir := t.TempDir()
+	t.Chdir(dir)
+	appPath := filepath.Join(dir, "app.yaml")
+	app := "env: {appName: test, runMode: test, timeLocation: UTC, localIP: 127.0.0.1}\nlog: {format: text, hookStd: false}\n"
+	if err := os.WriteFile(appPath, []byte(app), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var srv, stoppingSrv *server.Server
+	plan := bootstrap.Plan{
+		Resources: []bootstrap.Resource{
+			{
+				Name: "test-nats-server",
+				Init: func(dir string, _ *lifecycle.Stack) error {
+					srv = startConsumerTestServer(t)
+					// 停机测试单独断开重连客户端，其余连接随 Plan 正常排空。
+					stoppingSrv = startConsumerTestServer(t)
+					events := "urls: [" + srv.ClientURL() + "]\nnamespace: test\n"
+					if err := os.WriteFile(filepath.Join(dir, "nats.events.yaml"), []byte(events), 0o600); err != nil {
+						return err
+					}
+					stopping := "urls: [" + stoppingSrv.ClientURL() + "]\n"
+					return os.WriteFile(filepath.Join(dir, "nats.stopping.yaml"), []byte(stopping), 0o600)
+				},
+			},
+			Instances("events", "stopping"),
+		},
+		Prepare: []bootstrap.Step{{
+			Name: "check-consumer",
+			Init: func(ctx context.Context, dir string, _ *lifecycle.Stack) error {
+				testConsumerService(t, ctx, dir, srv, stoppingSrv)
+				return nil
+			},
+		}},
+	}
+	if err := bootstrap.Run(t.Context(), appPath, plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func startConsumerTestServer(t *testing.T) *server.Server {
+	t.Helper()
+	srv, err := server.NewServer(&server.Options{
+		Host: "127.0.0.1", Port: -1, NoLog: true, NoSigs: true,
+		JetStream: true, StoreDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Start()
+	t.Cleanup(func() {
+		srv.Shutdown()
+		srv.WaitForShutdown()
+	})
+	if !srv.ReadyForConnections(5 * time.Second) {
+		t.Fatal("临时 NATS 未就绪")
+	}
+	return srv
+}
+
+func testConsumerService(t *testing.T, planCtx context.Context, dir string, srv, stoppingSrv *server.Server) {
+	t.Helper()
+	if _, err := natsx.NewNamed(natsx.Config{Name: "outside", URLs: []string{srv.ClientURL()}}); err != nil {
+		t.Fatal(err)
+	}
 	entered := make(chan context.Context, 1)
 	release := make(chan struct{})
 	js := &natsx.JetStreamHandlerRegistry{}
@@ -70,30 +133,12 @@ func TestConsumerService(t *testing.T) {
 		}
 	}
 	const filename = "nats-register.events.yaml"
-	write(filename, "{}")
-	if _, err := decl.Build(t.Context(), dir); err == nil || err.Error() != `natsboot: look up NATS "events": natsx: client "events" is not registered` {
-		t.Fatalf("缺少共享客户端时应报告对应实例，得到 %v", err)
-	}
-	srv, err := server.NewServer(&server.Options{
-		Host: "127.0.0.1", Port: -1, NoLog: true, NoSigs: true,
-		JetStream: true, StoreDir: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv.Start()
-	defer func() {
-		srv.Shutdown()
-		srv.WaitForShutdown()
-	}()
-	if !srv.ReadyForConnections(5 * time.Second) {
-		t.Fatal("临时 NATS 未就绪")
-	}
-	write("nats.events.yaml", "urls: ["+srv.ClientURL()+"]\nnamespace: test\n")
-	var resources lifecycle.Stack
-	defer resources.Close()
-	if err := Instances("events").Init(dir, &resources); err != nil {
-		t.Fatal(err)
+	write("nats-register.outside.yaml", "{}")
+	if svc, err := ConsumerService("outside", js, core).Build(planCtx, dir); err == nil {
+		svc.Cancel()
+		t.Fatal("已注册但本次未声明的 NATS 不应构造消费服务")
+	} else if !strings.Contains(err.Error(), `nats instance "outside" is not declared`) {
+		t.Fatalf("应报告未声明的 NATS，得到 %v", err)
 	}
 	for _, tc := range []struct{ body, want string }{
 		{"jetStreamConsumers: []", "jetstreamconsumers"},
@@ -104,7 +149,7 @@ func TestConsumerService(t *testing.T) {
 		{"streamDefaults: {replicas: 1}\nstreams: [{name: X, subjects: [x], replicas: 2}]", "replicas"},
 	} {
 		write(filename, tc.body)
-		if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), filename) || !strings.Contains(err.Error(), tc.want) {
+		if _, err := decl.Build(planCtx, dir); err == nil || !strings.Contains(err.Error(), filename) || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("配置 %q 应报告路径及 %q，得到 %v", tc.body, tc.want, err)
 		}
 	}
@@ -112,9 +157,9 @@ func TestConsumerService(t *testing.T) {
 	client := natsx.Named("events")
 	cfg := natsx.DefaultStreamConfig("TEST_CHECK", 1, "test.check")
 	cfg.MaxBytes = 16384
-	stream, err := client.JetStream().CreateStream(t.Context(), cfg)
-	if err != nil {
-		t.Fatal(err)
+	stream, streamErr := client.JetStream().CreateStream(t.Context(), cfg)
+	if streamErr != nil {
+		t.Fatal(streamErr)
 	}
 	original := stream.CachedInfo().Config
 	const upsert = `streams:
@@ -147,7 +192,7 @@ func TestConsumerService(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			write(filename, upsert+tc.suffix)
-			_, buildErr := decl.Build(t.Context(), dir)
+			_, buildErr := decl.Build(planCtx, dir)
 			if buildErr == nil {
 				t.Fatal("Build 应拒绝冲突配置")
 			}
@@ -178,9 +223,9 @@ coreConsumers:
     queue: workers
     handler: Ping
 `)
-	s, err := decl.Build(t.Context(), dir)
-	if err != nil {
-		t.Fatal(err)
+	s, buildErr := decl.Build(planCtx, dir)
+	if buildErr != nil {
+		t.Fatal(buildErr)
 	}
 	if s.Name != "nats-consumer:events" || srv.GlobalAccount().SubscriptionInterest("test.demo.ping") {
 		t.Fatal("服务应按实例命名，并延迟至 Run 才订阅")
@@ -204,9 +249,9 @@ coreConsumers:
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	reply, err := client.Request(ctx, "demo.ping", nil)
-	if err != nil || string(reply.Data) != "pong" {
-		t.Fatalf("Core 请求应答失败: %v, %v", reply, err)
+	reply, requestErr := client.Request(ctx, "demo.ping", nil)
+	if requestErr != nil || string(reply.Data) != "pong" {
+		t.Fatalf("Core 请求应答失败: %v, %v", reply, requestErr)
 	}
 	if _, err := client.PublishJetStream(ctx, "demo.events.created", []byte("event"), "1"); err != nil {
 		t.Fatal(err)
@@ -241,20 +286,17 @@ coreConsumers:
 		t.Fatalf("停收后共享客户端应仍可发布: %v", err)
 	}
 	t.Run("Core注册断连时停机", func(t *testing.T) {
-		nc, err := natsx.NewNamed(natsx.Config{Name: "stopping", URLs: []string{srv.ClientURL()}})
-		if err != nil {
-			t.Fatal(err)
-		}
+		nc := natsx.Named("stopping")
 		write("nats-register.stopping.yaml", "coreConsumers: [{name: ping, subject: p, queue: q, subscribers: 1, handler: Ping}]")
-		service, err := ConsumerService("stopping", nil, core).Build(t.Context(), dir)
+		service, err := ConsumerService("stopping", nil, core).Build(planCtx, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
 		conn := nc.Conn()
 		reconnecting := conn.StatusChanged(nats.RECONNECTING)
 		defer conn.RemoveStatusListener(reconnecting)
-		srv.Shutdown()
-		srv.WaitForShutdown()
+		stoppingSrv.Shutdown()
+		stoppingSrv.WaitForShutdown()
 		select {
 		case <-reconnecting:
 		case <-time.After(3 * time.Second):
@@ -272,13 +314,13 @@ coreConsumers:
 		if conn.NumSubscriptions() == baseline {
 			t.Fatal("未进入 Core 注册阶段")
 		}
-		if err := service.Stop(); err != nil {
-			t.Fatal(err)
+		if stopErr := service.Stop(); stopErr != nil {
+			t.Fatal(stopErr)
 		}
 		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatalf("停机期间注册应正常退出：%v", err)
+		case runErr := <-done:
+			if runErr != nil {
+				t.Fatalf("停机期间注册应正常退出：%v", runErr)
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("停机未中断 Core 注册等待")

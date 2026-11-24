@@ -47,7 +47,7 @@ func TestMySQLTimestampDSTAndConnections(t *testing.T) {
 					t.Fatalf("预期回拨两侧相同墙上时间: %v", record.ExpiresAt)
 				}
 				if time.Since(record.CreatedAt).Abs() > 10*time.Second {
-					t.Fatalf("数据库时钟发生偏移: %v", record.CreatedAt)
+					t.Fatalf("创建时间偏离应用服务器时钟: %v", record.CreatedAt)
 				}
 			}
 		})

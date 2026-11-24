@@ -38,7 +38,10 @@ func TestNamedInstances(t *testing.T) {
 			}
 			var opened []string
 			closed := 0
-			step := bootstrap.NamedInstances("sample", tc.names, func(name string, cfg *settings) error {
+			step := bootstrap.NamedInstances("sample", tc.names, func(configDir, name string, cfg *settings) error {
+				if configDir != dir {
+					t.Fatalf("配置目录 = %q，期望 %q", configDir, dir)
+				}
 				opened = append(opened, name+":"+cfg.Value)
 				if cfg.Value == "fail" {
 					return openErr
@@ -56,8 +59,8 @@ func TestNamedInstances(t *testing.T) {
 			if !slices.Equal(opened, tc.wantOpened) {
 				t.Fatalf("opened %v, want %v", opened, tc.wantOpened)
 			}
-			if err := stack.Close(); err != nil {
-				t.Fatal(err)
+			if closeErr := stack.Close(); closeErr != nil {
+				t.Fatal(closeErr)
 			}
 			if len(opened) > 0 && closed != 1 || len(opened) == 0 && closed != 0 {
 				t.Fatalf("opened %v, closed %d times", opened, closed)

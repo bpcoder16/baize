@@ -3,6 +3,7 @@ package outbox
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/bpcoder16/baize/constant"
 	outboxerr "github.com/bpcoder16/baize/error/outbox"
@@ -17,7 +18,7 @@ type Update struct {
 	Attempted bool
 }
 
-// WithLockedRecord 在同一事务内读取、调用处理函数并写回结果。ctx 在提交前取消时，事务回滚并释放行锁。
+// WithLockedRecord 在同一主库事务内读取、调用处理函数并写回结果。ctx 在提交前取消时，事务回滚并释放行锁。
 // 处理函数与存储操作的错误分别返回。
 // pendingType 用于补偿，锁定时再次复核类型和状态，跳过本轮不能处理的记录。
 func (s *Store) WithLockedRecord(
@@ -39,7 +40,7 @@ func (s *Store) WithLockedRecord(
 	}
 	defer tx.Rollback()
 
-	query := s.clean(tx).Clauses(clause.Locking{
+	query := tableSession(tx, s.table).Clauses(clause.Locking{
 		Strength: "UPDATE",
 		Options:  "NOWAIT",
 	}).Where("id = ?", id)
@@ -71,11 +72,12 @@ func (s *Store) WithLockedRecord(
 	if result.Status == "" {
 		return taskErr, nil
 	}
+	now := time.Now().Truncate(time.Microsecond)
 	values := map[string]any{
 		"status":      result.Status,
 		"last_error":  "",
-		"updated_at":  gorm.Expr(s.nowSQL()),
-		"finished_at": gorm.Expr(s.nowSQL()),
+		"updated_at":  now,
+		"finished_at": now,
 	}
 	if result.Attempted {
 		values["attempts"] = row.Attempts + 1
@@ -86,7 +88,7 @@ func (s *Store) WithLockedRecord(
 	if result.Status == constant.OutboxPending {
 		values["finished_at"] = nil
 	}
-	if err := s.clean(tx).Where("id = ?", id).Updates(values).Error; err != nil {
+	if err := tableSession(tx, s.table).Where("id = ?", id).Updates(values).Error; err != nil {
 		return taskErr, err
 	}
 	return taskErr, tx.Commit().Error

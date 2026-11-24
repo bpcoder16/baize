@@ -16,6 +16,7 @@ import (
 
 	"github.com/bpcoder16/baize/bootstrap"
 	"github.com/bpcoder16/baize/bootstrap/cronboot"
+	"github.com/bpcoder16/baize/bootstrap/internal/db"
 	"github.com/bpcoder16/baize/bootstrap/mysqlboot"
 	"github.com/bpcoder16/baize/bootstrap/natsboot"
 	"github.com/bpcoder16/baize/bootstrap/postgresqlboot"
@@ -78,8 +79,8 @@ func TestOutboxPlan(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if err := prepare.Init(conflictCtx, migrationDir, stack); err == nil || !strings.Contains(err.Error(), "duplicate job") {
-				return fmt.Errorf("expected duplicate Outbox job: %v", err)
+			if prepareErr := prepare.Init(conflictCtx, migrationDir, stack); prepareErr == nil || !strings.Contains(prepareErr.Error(), "duplicate job") {
+				return fmt.Errorf("expected duplicate Outbox job: %v", prepareErr)
 			}
 			return nil
 		},
@@ -88,10 +89,11 @@ func TestOutboxPlan(t *testing.T) {
 		Resources: []bootstrap.Resource{dbResource, natsboot.Instances("audit", "excluded", "events", "core")},
 		Services:  []bootstrap.Service{cronboot.Service(nil)},
 		Prepare: []bootstrap.Step{failedPrepares, prepare, {Name: "enqueue", Init: func(ctx context.Context, _ string, _ *lifecycle.Stack) error {
-			db, err := masterDB(ctx, backend, "orders")
+			database, err := db.LookupClient(ctx, backend, "orders")
 			if err != nil {
 				return err
 			}
+			master := database.MasterDB(ctx)
 			for _, name := range []string{"events", "audit", "excluded"} {
 				_, err = natsx.Named(name).JetStream().CreateStream(ctx, jetstream.StreamConfig{Name: "ORDERS", Subjects: []string{"orders.created"}})
 				if err != nil {
@@ -106,31 +108,31 @@ func TestOutboxPlan(t *testing.T) {
 				ExpiresAt:    time.Now().Add(time.Hour),
 			}
 			for _, target := range []string{"unknown", "excluded"} {
-				if _, err := outbox.EnqueueJetStreamTx(nil, outbox.JetStreamMessage{ResourceName: target, Subject: msg.Subject}); !errors.Is(err, outbox.ErrInvalidResource) {
-					return fmt.Errorf("target %q: expected invalid resource, got %v", target, err)
+				if _, enqueueErr := outbox.EnqueueJetStreamTx(nil, outbox.JetStreamMessage{ResourceName: target, Subject: msg.Subject}); !errors.Is(enqueueErr, outbox.ErrInvalidResource) {
+					return fmt.Errorf("target %q: expected invalid resource, got %v", target, enqueueErr)
 				}
 			}
 			rollback := errors.New("rollback")
-			if err = db.Transaction(func(tx *gorm.DB) error {
-				if _, err := outbox.EnqueueJetStreamTx(tx, msg); err != nil {
-					return err
+			if err = master.Transaction(func(tx *gorm.DB) error {
+				if _, enqueueErr := outbox.EnqueueJetStreamTx(tx, msg); enqueueErr != nil {
+					return enqueueErr
 				}
 				return rollback
 			}); !errors.Is(err, rollback) {
 				return fmt.Errorf("expected rollback, got %v", err)
 			}
-			if _, err := jetStreamClients(ctx, []string{"audit", "missing"}); err == nil || !strings.Contains(err.Error(), "missing") {
-				return fmt.Errorf("missing required instance: %v", err)
+			if _, lookupErr := jetStreamClients(ctx, []string{"audit", "missing"}); lookupErr == nil || !strings.Contains(lookupErr.Error(), "missing") {
+				return fmt.Errorf("missing required instance: %v", lookupErr)
 			}
-			if _, err := jetStreamClients(ctx, []string{"audit", "core"}); err == nil || !strings.Contains(err.Error(), "core") {
-				return fmt.Errorf("JetStream-disabled instance: %v", err)
+			if _, lookupErr := jetStreamClients(ctx, []string{"audit", "core"}); lookupErr == nil || !strings.Contains(lookupErr.Error(), "core") {
+				return fmt.Errorf("JetStream-disabled instance: %v", lookupErr)
 			}
 			// 复用已有表，模拟目标被移出名单的积压任务。
-			store, err := repo.OpenExisting(ctx, repo.StoreConfig{Backend: backend, MasterDB: db})
+			store, err := repo.OpenExisting(ctx, repo.StoreConfig{Backend: backend, Client: database})
 			if err != nil {
 				return err
 			}
-			if err := db.Transaction(func(tx *gorm.DB) error {
+			if txErr := master.Transaction(func(tx *gorm.DB) error {
 				var enqueueErr error
 				auditID, enqueueErr = outbox.EnqueueJetStreamTx(tx, msg)
 				if enqueueErr != nil {
@@ -143,10 +145,10 @@ func TestOutboxPlan(t *testing.T) {
 					ExpiresAt:    msg.ExpiresAt,
 				})
 				return enqueueErr
-			}); err != nil {
-				return err
+			}); txErr != nil {
+				return txErr
 			}
-			databases <- db
+			databases <- master
 			return nil
 		}}},
 	}
@@ -211,7 +213,7 @@ func TestOutboxPlan(t *testing.T) {
 	}
 	// 两个集群接受相同 subject，按正文验证主动发送的实际目的地。
 	var immediateID int64
-	err := db.Transaction(func(tx *gorm.DB) error {
+	txErr := db.Transaction(func(tx *gorm.DB) error {
 		var enqueueErr error
 		immediateID, enqueueErr = outbox.EnqueueJetStreamTx(tx, outbox.JetStreamMessage{
 			Subject:   "orders.created",
@@ -221,8 +223,8 @@ func TestOutboxPlan(t *testing.T) {
 		})
 		return enqueueErr
 	})
-	if err != nil {
-		t.Fatal(err)
+	if txErr != nil {
+		t.Fatal(txErr)
 	}
 	var row model.Record
 	if err := db.WithContext(ctx).Table("baize_outbox").Where("id = ?", immediateID).Take(&row).Error; err != nil || row.ResourceName != "events" || row.HandlerType != constant.NatsJetStream {

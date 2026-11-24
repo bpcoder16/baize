@@ -64,14 +64,14 @@ endpoint: %q
 
 	var resources lifecycle.Stack
 	defer resources.Close()
-	err := Instances(names...).Init(dir, &resources)
+	initErr := Instances(names...).Init(dir, &resources)
 	if mode == "missing-instance-id" {
-		if err == nil || !strings.Contains(err.Error(), "aliyunesx.backup.yaml") {
-			t.Fatalf("缺少云实例 ID 时应报告对应配置文件，实际为 %v", err)
+		if initErr == nil || !strings.Contains(initErr.Error(), "aliyunesx.backup.yaml") {
+			t.Fatalf("缺少云实例 ID 时应报告对应配置文件，实际为 %v", initErr)
 		}
 		names = names[:1]
-	} else if err != nil {
-		t.Fatal(err)
+	} else if initErr != nil {
+		t.Fatal(initErr)
 	}
 	if calls.Load() != 0 {
 		t.Fatal("初始化时向阿里云 ES 发出了请求")

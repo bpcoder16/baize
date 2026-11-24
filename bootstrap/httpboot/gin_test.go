@@ -89,9 +89,9 @@ cors:
     allowMethods: [GET]
     maxAge: 10m
 `)
-	service, err := decl.Build(t.Context(), dir)
-	if err != nil {
-		t.Fatal(err)
+	service, buildErr := decl.Build(t.Context(), dir)
+	if buildErr != nil {
+		t.Fatal(buildErr)
 	}
 	if calls != 1 || engine == nil || gin.Mode() != mode {
 		t.Fatalf("注册次数 %d，Gin 模式 %s", calls, gin.Mode())

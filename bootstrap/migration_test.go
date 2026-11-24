@@ -39,8 +39,8 @@ func TestSameNameMigrationSteps(t *testing.T) {
 		if err := tc.disabled.Init(t.Context(), dir, nil); err != nil {
 			t.Fatalf("启用 %s 不应开启另一种数据库的迁移: %v", tc.kind, err)
 		}
-		if err := tc.enabled.Init(t.Context(), dir, nil); err == nil || !strings.Contains(err.Error(), "default") || !strings.Contains(err.Error(), tc.kind) {
-			t.Fatalf("已开启的迁移应报告缺少的实例和数据库类型: %v", err)
+		if err := tc.enabled.Init(t.Context(), dir, nil); err == nil || !strings.Contains(err.Error(), tc.kind+` instance "default" is not declared`) {
+			t.Fatalf("已开启的迁移应报告未声明的实例和数据库类型: %v", err)
 		}
 		if err := os.WriteFile(file, []byte("enabled: false"), 0600); err != nil {
 			t.Fatal(err)

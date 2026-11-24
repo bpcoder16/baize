@@ -22,8 +22,8 @@ func liveStore(t *testing.T, backend constant.Backend, mysqlLocation ...*time.Lo
 	t.Helper()
 	db := testdb.Open(t, backend, mysqlLocation...)
 	store, err := repo.Open(t.Context(), repo.StoreConfig{
-		Backend:  backend,
-		MasterDB: db,
+		Backend: backend,
+		Client:  testdb.Client{Primary: db},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestOpenExisting(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			ctx := t.Context()
 			db := testdb.Open(t, backend)
-			cfg := repo.StoreConfig{Backend: backend, MasterDB: db}
+			cfg := repo.StoreConfig{Backend: backend, Client: testdb.Client{Primary: db}}
 			if _, err := repo.OpenExisting(ctx, cfg); err == nil || !strings.Contains(err.Error(), "baize_outbox") {
 				t.Fatalf("缺表应返回包含表名的错误，得到 %v", err)
 			}
@@ -99,6 +99,12 @@ func TestOpenExisting(t *testing.T) {
 				t.Fatal("关闭迁移不应重建索引")
 			}
 			enqueue(t, store, db)
+			if err = db.Exec("ALTER TABLE baize_outbox DROP COLUMN last_error").Error; err != nil {
+				t.Fatal(err)
+			}
+			if existing, openErr := repo.OpenExisting(ctx, cfg); existing != nil || openErr == nil || !strings.Contains(openErr.Error(), "last_error") {
+				t.Fatalf("缺少 last_error 列时应拒绝打开仓储，得到 %v", openErr)
+			}
 		})
 	}
 }
@@ -206,7 +212,7 @@ func TestMasterUsesCurrentContext(t *testing.T) {
 		cancel()
 		cached := db.Table("not_a_real_table").Where("invalid_column = ?", 1).WithContext(oldContext)
 		cfg := *base.TestConfig()
-		cfg.MasterDB = cached
+		cfg.Client = testdb.Client{Primary: cached}
 		openCtx, cancelOpen := context.WithCancel(t.Context())
 		defer cancelOpen()
 		store, err := repo.Open(openCtx, cfg)
@@ -471,7 +477,7 @@ func TestEnqueueRejectsInvalidTransactionAndTask(t *testing.T) {
 				t.Errorf("初始化时应拒绝错误方言: %v", err)
 			}
 			inTx := *s.TestConfig()
-			inTx.MasterDB = tx
+			inTx.Client = testdb.Client{Primary: tx}
 			if _, err := repo.Open(t.Context(), inTx); !errors.Is(err, outbox.ErrInvalidSession) {
 				t.Errorf("初始化时应拒绝事务句柄: %v", err)
 			}
@@ -546,7 +552,7 @@ func TestOpenSerializesConcurrentFirstMigration(t *testing.T) {
 	for _, backend := range []constant.Backend{constant.MySQL, constant.PostgreSQL} {
 		t.Run(string(backend), func(t *testing.T) {
 			db := testdb.Open(t, backend)
-			cfg := repo.StoreConfig{Backend: backend, MasterDB: db}
+			cfg := repo.StoreConfig{Backend: backend, Client: testdb.Client{Primary: db}}
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			start := make(chan struct{})

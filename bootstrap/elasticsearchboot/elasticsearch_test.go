@@ -1,6 +1,7 @@
 package elasticsearchboot_test
 
 import (
+	"context"
 	"encoding/pem"
 	"fmt"
 	"net/http"
@@ -12,10 +13,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bpcoder16/baize/bootstrap"
 	"github.com/bpcoder16/baize/bootstrap/elasticsearchboot"
 	esv7 "github.com/bpcoder16/baize/bootstrap/elasticsearchboot/v7"
 	esv8 "github.com/bpcoder16/baize/bootstrap/elasticsearchboot/v8"
 	esv9 "github.com/bpcoder16/baize/bootstrap/elasticsearchboot/v9"
+	"github.com/bpcoder16/baize/constant"
 	"github.com/bpcoder16/pixiu/infra/elasticsearchx"
 	"github.com/bpcoder16/pixiu/lifecycle"
 )
@@ -37,6 +40,73 @@ func TestInstances(t *testing.T) {
 	}
 	dir := t.TempDir()
 	names := []string{"legacy", "default", "events"}
+	var clients []*elasticsearchx.Client
+	if mode == "version-mismatch" {
+		writeInstanceConfigs(t, dir, names)
+		var resources lifecycle.Stack
+		defer resources.Close()
+		group := elasticsearchboot.Instances(esv7.Named("legacy"), esv8.Named("default", "events"))
+		initErr := group.Init(dir, &resources)
+		if initErr == nil || !strings.Contains(initErr.Error(), "elasticsearch.events.yaml") || !strings.Contains(initErr.Error(), "major mismatch") {
+			t.Fatalf("版本不符应指出实例路径和原因，实际为 %v", initErr)
+		}
+		names = names[:2]
+		clients = checkInstances(t, t.Context(), names, elasticsearchx.Named)
+		if err := resources.Close(); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		clients = checkPlanInstances(t, dir, names)
+	}
+	for i, client := range clients {
+		if _, err := client.Count(t.Context(), "products", map[string]any{}); err == nil || !strings.Contains(err.Error(), "closed") {
+			t.Fatalf("资源栈未关闭 %q", names[i])
+		}
+	}
+}
+
+func checkPlanInstances(t *testing.T, dir string, names []string) []*elasticsearchx.Client {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	appPath := filepath.Join(dir, "app.yaml")
+	app := "env: {appName: test, runMode: test, timeLocation: UTC, localIP: 127.0.0.1}\nlog: {format: text, hookStd: false}\n"
+	if err := os.WriteFile(appPath, []byte(app), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var clients []*elasticsearchx.Client
+	plan := bootstrap.Plan{
+		Resources: []bootstrap.Resource{
+			{
+				Name: "test-elasticsearch-servers",
+				Init: func(dir string, _ *lifecycle.Stack) error {
+					writeInstanceConfigs(t, dir, names)
+					return nil
+				},
+			},
+			elasticsearchboot.Instances(esv7.Named("legacy"), esv8.Named("default"), esv9.Named("events")),
+		},
+		Prepare: []bootstrap.Step{{
+			Name: "check-elasticsearch-instances",
+			Init: func(ctx context.Context, _ string, _ *lifecycle.Stack) error {
+				clients = checkInstances(t, ctx, names, func(name string) *elasticsearchx.Client {
+					client, err := bootstrap.LookupDeclared(ctx, constant.ResourceElasticsearch, name, elasticsearchx.Named)
+					if err != nil {
+						t.Fatalf("借用 Elasticsearch 实例 %q 失败: %v", name, err)
+					}
+					return client
+				})
+				return nil
+			},
+		}},
+	}
+	if err := bootstrap.Run(t.Context(), appPath, plan); err != nil {
+		t.Fatal(err)
+	}
+	return clients
+}
+
+func writeInstanceConfigs(t *testing.T, dir string, names []string) {
+	t.Helper()
 	for i, name := range names {
 		major := 7 + i
 		auth := "username: test\npassword: pass\n"
@@ -72,40 +142,21 @@ func TestInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var resources lifecycle.Stack
-	defer resources.Close()
-	events := esv9.Named("events")
-	if mode == "version-mismatch" {
-		events = esv8.Named("events")
-	}
-	group := elasticsearchboot.Instances(esv7.Named("legacy"), esv8.Named("default"), events)
-	err := group.Init(dir, &resources)
-	if mode == "version-mismatch" {
-		if err == nil || !strings.Contains(err.Error(), "elasticsearch.events.yaml") || !strings.Contains(err.Error(), "major mismatch") {
-			t.Fatalf("版本不符应指出实例路径和原因，实际为 %v", err)
-		}
-		names = names[:2]
-	} else if err != nil {
-		t.Fatal(err)
-	}
+}
+
+func checkInstances(t *testing.T, ctx context.Context, names []string, named func(string) *elasticsearchx.Client) []*elasticsearchx.Client {
+	t.Helper()
 	var clients []*elasticsearchx.Client
 	query := map[string]any{}
 	for i, name := range names {
-		client := elasticsearchx.Named(name)
-		count, err := client.Count(t.Context(), "products", query)
+		client := named(name)
+		count, err := client.Count(ctx, "products", query)
 		if err != nil || count != int64(7+i) {
 			t.Fatalf("实例 %q 返回 %d, %v", name, count, err)
 		}
 		clients = append(clients, client)
 	}
-	if err := resources.Close(); err != nil {
-		t.Fatal(err)
-	}
-	for i, client := range clients {
-		if _, err := client.Count(t.Context(), "products", query); err == nil || !strings.Contains(err.Error(), "closed") {
-			t.Fatalf("资源栈未关闭 %q", names[i])
-		}
-	}
+	return clients
 }
 
 func TestLegacyVersionKey(t *testing.T) {

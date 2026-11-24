@@ -1,0 +1,22 @@
+# RAM 角色 ARN；留空时不签发上传凭据。
+stsRoleARN: ""
+# 角色会话名，默认 oss-upload。
+stsSessionName: "oss-upload"
+
+# 公有桶下载 CDN 地址，可包含路径前缀，如 https://cdn.example.com/assets。
+# 留空不影响上传和私有桶签名，获取公有桶下载 URL 时须配置。
+publicBucketCDN: ""
+# 私有桶下载签名有效期，省略时为 15m；须为 1s 至 168h 的整秒时长。
+privateBucketURLExpires: "15m"
+
+# 业务场景只引用已初始化的 public/private 对应的实例，不重复配置 OSS 凭据。
+scenes:
+  config-file:
+    bucketType: "public"
+    targetDir: "config-file"
+    # STS 凭据有效期；省略时为 40m。须为 15m 至 12h 的整秒时长，仍受角色最大会话时长限制。
+    stsDuration: "15m"
+    maxBatchCount: 1
+    maxSize: 10485760
+    allowedExts:
+      - ".json"

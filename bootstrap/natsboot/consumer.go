@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/bpcoder16/baize/bootstrap"
-	"github.com/bpcoder16/baize/bootstrap/internal/instancekey"
 	"github.com/bpcoder16/baize/constant"
 	"github.com/bpcoder16/pixiu/infra/apprun"
 	"github.com/bpcoder16/pixiu/infra/configx"
@@ -18,15 +17,15 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// ConsumerService 为已声明的 NATS 实例装配 nats-consumer:<实例名> 服务。
+// ConsumerService 为本次 Plan.Resources 中声明的 NATS 实例装配 nats-consumer:<实例名> 服务。
 // Build 绑定 Handler 并预检整份订阅配置，Run 按序注册 Stream、JetStream 和 Core。
 // 每个实例只声明一次。服务负责停收与排空，共享连接由 Instances 回收。
 func ConsumerService(name string, js *natsx.JetStreamHandlerRegistry, core *natsx.CoreHandlerRegistry) bootstrap.Service {
 	serviceName := constant.ServiceNATSConsumer + ":" + name
 	return bootstrap.Service{
 		Name: serviceName,
-		Build: func(_ context.Context, dir string) (apprun.Service, error) {
-			if !instancekey.Valid(name) {
+		Build: func(ctx context.Context, dir string) (apprun.Service, error) {
+			if !bootstrap.ValidNamePart(name) {
 				return apprun.Service{}, fmt.Errorf("natsboot: invalid NATS instance name %q", name)
 			}
 			path := filepath.Join(dir, "nats-register."+name+".yaml")
@@ -34,7 +33,7 @@ func ConsumerService(name string, js *natsx.JetStreamHandlerRegistry, core *nats
 			if err != nil {
 				return apprun.Service{}, err
 			}
-			client, err := instancekey.Lookup("NATS", name, natsx.Named)
+			client, err := bootstrap.LookupDeclared(ctx, constant.ResourceNATS, name, natsx.Named)
 			if err != nil {
 				return apprun.Service{}, fmt.Errorf("natsboot: %w", err)
 			}

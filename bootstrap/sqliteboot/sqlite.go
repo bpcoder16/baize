@@ -28,7 +28,7 @@ type fileConfig struct {
 	InterpolateSQL bool                    `mapstructure:"interpolateSQL"`
 }
 
-func open(name string, cfg *fileConfig) error {
+func open(_, name string, cfg *fileConfig) error {
 	_, err := sqlitex.NewNamed(sqlitex.Config{
 		Name:           name,
 		DSN:            cfg.DSN,

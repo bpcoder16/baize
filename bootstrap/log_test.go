@@ -23,8 +23,8 @@ func TestPrepareLogConfig(t *testing.T) {
 		{appconfig.LogConfig{Format: "json", Names: []string{"http", "http"}}, "log.names"},
 		{appconfig.LogConfig{Format: "json", Names: []string{"a/b"}}, "log.names"},
 	} {
-		if _, err := prepareLogConfig(tc.cfg, "cards"); err == nil || !strings.Contains(err.Error(), tc.field) {
-			t.Errorf("%s: got %v", tc.field, err)
+		if _, configErr := prepareLogConfig(tc.cfg, "cards"); configErr == nil || !strings.Contains(configErr.Error(), tc.field) {
+			t.Errorf("%s: got %v", tc.field, configErr)
 		}
 	}
 }

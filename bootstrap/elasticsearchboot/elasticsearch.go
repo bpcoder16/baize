@@ -13,7 +13,6 @@ import (
 	"github.com/bpcoder16/baize/bootstrap"
 	"github.com/bpcoder16/baize/constant"
 	"github.com/bpcoder16/pixiu/infra/elasticsearchx"
-	"github.com/bpcoder16/pixiu/lifecycle"
 )
 
 // Group 声明使用同一个主版本客户端的实例，由版本子包的 Named 创建。
@@ -32,16 +31,10 @@ func Instances(groups ...Group) bootstrap.Resource {
 			byName[name] = group
 		}
 	}
-	return bootstrap.Resource{
-		Name: constant.ResourceElasticsearch,
-		Init: func(dir string, resources *lifecycle.Stack) error {
-			open := func(name string, cfg *fileConfig) error {
-				return byName[name].open(dir, name, cfg)
-			}
-			group := bootstrap.NamedInstances(constant.ResourceElasticsearch, names, open, elasticsearchx.CloseAll)
-			return group.Init(dir, resources)
-		},
+	open := func(dir, name string, cfg *fileConfig) error {
+		return byName[name].open(dir, name, cfg)
 	}
+	return bootstrap.NamedInstances(constant.ResourceElasticsearch, names, open, elasticsearchx.CloseAll)
 }
 
 func (g Group) open(dir, name string, cfg *fileConfig) error {

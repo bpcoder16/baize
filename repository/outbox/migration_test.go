@@ -139,6 +139,7 @@ func TestMySQLTimestampDefaultsAndRepeatedMigration(t *testing.T) {
 			// 仅临时测试连接使用这组参数；liveStore 创建隔离库，不修改实例或业务连接。
 			cfg.Params["explicit_defaults_for_timestamp"] = mode
 			cfg.Params["sql_mode"] = "'" + sqlMode + "'"
+			cfg.Params["timestamp"] = "946684800"
 			t.Setenv("BAIZE_OUTBOX_MYSQL_DSN", cfg.FormatDSN())
 			store, db := liveStore(t, constant.MySQL, time.UTC)
 			ctx := context.Background()
@@ -151,7 +152,7 @@ func TestMySQLTimestampDefaultsAndRepeatedMigration(t *testing.T) {
 				t.Fatalf("未设置的期限和完成时间必须为 NULL: %+v", record)
 			}
 			if time.Since(record.CreatedAt).Abs() > 10*time.Second || !record.CreatedAt.Equal(record.UpdatedAt) {
-				t.Fatalf("创建和更新时间必须使用数据库时钟: %+v", record)
+				t.Fatalf("创建和更新时间应使用同一个应用服务器时间: %+v", record)
 			}
 
 			// 同时尝试改写两个时间列，只有更新时间应当采用过去的基准值。
@@ -186,7 +187,8 @@ func TestMySQLTimestampDefaultsAndRepeatedMigration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if record.Status != constant.OutboxSucceeded || !record.CreatedAt.Equal(createdAt) || !record.UpdatedAt.After(baseline) || record.FinishedAt == nil || record.ExpiresAt != nil {
+			if record.Status != constant.OutboxSucceeded || !record.CreatedAt.Equal(createdAt) || !record.UpdatedAt.After(baseline) || record.ExpiresAt != nil ||
+				record.FinishedAt == nil || !record.FinishedAt.Equal(record.UpdatedAt) || time.Since(record.UpdatedAt).Abs() > 10*time.Second {
 				t.Fatalf("发送成功应显式回写更新和完成时间，保持创建时间和空期限: %+v", record)
 			}
 			var actual struct {

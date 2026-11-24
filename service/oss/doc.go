@@ -1,4 +1,15 @@
-// Package oss 提供 multipart 文件上传、限定 OSS 对象的 STS 凭据签发及 URL 内容摘要。
+// Package oss 提供基于场景和上传记录的业务流程，以及可单独使用的 OSS 上传能力。
+//
+// 宿主通过 ossboot.Prepare 装配上传记录表与云客户端后，可用 [Default] 取得 [Uploads]，
+// 调用 CreateToken、Confirm、DirectUpload 和 AllCompleted。批量取展示地址用 [Uploads.DisplayURLMap]，
+// 取原始对象地址用 [Uploads.OriginURLMap]。需要从主库读取时，可分别调用
+// [Uploads.DisplayURLMapOnMaster] 和 [Uploads.OriginURLMapOnMaster]。宿主负责鉴权及记录归属校验。
+//
+// 自行管理上传记录的宿主可用 [New] 为单个桶创建 [Service]，按需调用
+// CreateUploadCredentials 或 UploadMultipart。独立函数 [MD5FromURL] 可直接调用。
+//
+// # 单桶上传凭据
+//
 // New(ossClient) 仅要求 OSS 客户端；需要签发凭据时通过 WithSTSClient 注入 STS 客户端。
 // 未配置 STS 不影响服务构造，调用 CreateUploadCredentials 时返回 ErrSTSNotConfigured。
 //

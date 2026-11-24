@@ -57,8 +57,8 @@ func storeWithBeginError(t *testing.T, begin func(context.Context) error) *repo.
 	}
 	db.Statement.ConnPool = beginErrorPool{DB: pool, begin: begin}
 	store, err := repo.Open(t.Context(), repo.StoreConfig{
-		Backend:  constant.MySQL,
-		MasterDB: db,
+		Backend: constant.MySQL,
+		Client:  testdb.Client{Primary: db},
 	})
 	if err != nil {
 		t.Fatal(err)

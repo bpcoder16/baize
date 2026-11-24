@@ -28,9 +28,9 @@ func TestInstancesValidateBeforeConnecting(t *testing.T) {
 }
 
 func TestFileConfig(t *testing.T) {
-	cfg, err := configx.Parse[fileConfig](filepath.Join("..", "..", "conf.example", "clickhouse.default.yaml"))
-	if err != nil {
-		t.Fatal(err)
+	cfg, parseErr := configx.Parse[fileConfig](filepath.Join("..", "..", "conf.example", "clickhouse.default.yaml"))
+	if parseErr != nil {
+		t.Fatal(parseErr)
 	}
 	cfg.Slaves = []addressConfig{{Host: "replica", Port: 8123}}
 	for _, tt := range []struct {
