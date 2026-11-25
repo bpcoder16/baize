@@ -19,6 +19,7 @@ var (
 	ErrUnavailable    = errors.New("share: service unavailable")
 	ErrUnregistered   = errors.New("share: page or request type not registered")
 	ErrInvalidRequest = errors.New("share: invalid owner or request")
+	ErrMissingPageURL = errors.New("share: pageURL is required to build a URL")
 	ErrURLTooLong     = errors.New("share: URL too long")
 	ErrInvalidShare   = errors.New("share: invalid link")
 )

@@ -16,6 +16,6 @@
 //		return Product.Build(ownerID, ProductRequest{ID: id})
 //	}
 //
-// 打开路由由宿主挂载，从查询串取得唯一的 s 参数，再调用 [Open]。
+// 仅使用 [Page.Build] 和 [Open] 时可以省略 pageURL。生成完整链接时由宿主从查询串取得唯一的 s 参数，再调用 [Open]。
 // 正常轮换时保留原密钥和旧页面解码逻辑，新链接可使用新的密钥或页面版本。
 package share

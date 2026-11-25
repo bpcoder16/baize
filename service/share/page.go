@@ -42,9 +42,13 @@ func (p Page[T]) Build(ownerID string, req T) (string, error) {
 }
 
 // BuildURL 使用当前活动密钥构造长期分享链接，失败时返回空串。
+// 服务已装配但未配置 pageURL 时返回 [ErrMissingPageURL]。
 // ownerID 由业务校验归属后提供，同一页面允许多次分享。
 func (p Page[T]) BuildURL(ownerID string, req T) (string, error) {
 	s := active.Load()
+	if s != nil && s.pageURL == nil {
+		return "", ErrMissingPageURL
+	}
 	token, err := p.buildToken(s, ownerID, req)
 	if err != nil {
 		return "", err

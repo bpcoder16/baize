@@ -30,9 +30,9 @@ func productShareURL(ownerID, productID string) (string, error) {
 
 将 `prepareShares()` 加入 `Plan.Prepare`。同一个 `Prepare` 可接受多种类型的注册声明。注册失败会中止启动。配置、密钥和全部声明验证通过后服务才对业务可见，退出时随启动资源栈释放。
 
-单独签发时调用 `ProductPage.Build(ownerID, req)`。返回值是查询参数 `s` 的完整值，可直接传给 `share.Open(c, token)`。token 最多 2,048 字节。`BuildURL` 的 2,048 字节上限计入页面地址和所有查询参数。
+单独签发时调用 `ProductPage.Build(ownerID, req)`。返回的 token 可直接传给 `share.Open(c, token)`，最多 2,048 字节。使用 `BuildURL` 生成完整链接时需要配置 `pageURL`，2,048 字节上限计入页面地址和所有查询参数。
 
-`pageURL` 可以指向宿主直接渲染的页面，也可以指向将 token 转交给业务 API 的前端页面。宿主的打开入口只取一个 `s` 参数。成功时由页面 handler 写响应，用户重复打开或链接预览均会触发读取。需要改变业务状态的操作应由页面引导用户提交至相应的已鉴权接口。
+`pageURL` 可以指向宿主直接渲染的页面，也可以指向将 token 转交给业务 API 的前端页面。使用完整链接时，宿主的打开入口只取一个 `s` 查询参数。成功时由页面 handler 写响应，用户重复打开或链接预览均会触发读取。需要改变业务状态的操作应由页面引导用户提交至相应的已鉴权接口。
 
 ```go
 func OpenShare(c *gin.Context) {
@@ -49,7 +49,7 @@ func OpenShare(c *gin.Context) {
 
 ## 配置和链接协议
 
-将模板放在 `app.yaml` 同目录。`pageURL` 要求绝对 HTTPS 地址，可以包含路径和固定查询参数，显式端口范围为 1–65535。`s` 为保留参数。用户凭据、片段、越界端口和无效查询都会导致 Prepare 失败。`activeKeyID` 指向 `keys` 中的签发密钥。每项 `id` 必须唯一，`key` 直接填写 32 个安全随机字节的标准 Base64 编码，可用 `openssl rand -base64 32` 生成。真实密钥只放在部署配置中，各环境和宿主独立用钥。[配置模板](../conf.example/baize.share.yaml)
+将模板放在 `app.yaml` 同目录。仅使用 `Build` 和 `Open` 时可省略 `pageURL`。填写时须为绝对 HTTPS 地址，可以包含路径和固定查询参数，显式端口范围为 1–65535。`s` 为保留参数。空字符串、用户凭据、片段、越界端口和无效查询都会导致 Prepare 失败。`activeKeyID` 指向 `keys` 中的签发密钥。每项 `id` 必须唯一，`key` 直接填写 32 个安全随机字节的标准 Base64 编码，可用 `openssl rand -base64 32` 生成。真实密钥只放在部署配置中，各环境和宿主独立用钥。[配置模板](../conf.example/baize.share.yaml)
 
 从旧版 `keyEnv` 配置迁移时，把各环境变量原有的 Base64 值原样填入对应 `id` 的 `key` 字段，并移除 `keyEnv`。
 
@@ -105,6 +105,7 @@ func OpenShare(c *gin.Context) {
 | `share.ErrUnavailable` | 服务尚未装配或已经释放，按服务不可用处理。 |
 | `share.ErrUnregistered` | 签发使用的页面名或请求类型未在当前启动中注册。 |
 | `share.ErrInvalidRequest` | 检查归属 ID 和序列化后的请求。 |
+| `share.ErrMissingPageURL` | 服务已装配，但调用 `BuildURL` 时缺少 `pageURL`。 |
 | `share.ErrURLTooLong` | token 或完整 URL 超长。可缩小请求，构建 URL 时也可缩短页面地址或固定查询参数。 |
 | `share.ErrInvalidShare` | token、密钥编号、载荷或目标页面无效。Open 在调用 handler 前返回，宿主可展示统一错误页。 |
 

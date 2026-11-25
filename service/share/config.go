@@ -21,8 +21,8 @@ var (
 )
 
 type config struct {
-	PageURL     string `mapstructure:"pageURL"`
-	ActiveKeyID string `mapstructure:"activeKeyID"`
+	PageURL     *string `mapstructure:"pageURL"`
+	ActiveKeyID string  `mapstructure:"activeKeyID"`
 	Keys        []struct {
 		ID  string `mapstructure:"id"`
 		Key string `mapstructure:"key"`
@@ -36,9 +36,12 @@ func Load(file string, pages ...Registration) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	u, err := parsePageURL(cfg.PageURL)
-	if err != nil {
-		return nil, err
+	var pageURL *url.URL
+	if cfg.PageURL != nil {
+		pageURL, err = parsePageURL(*cfg.PageURL)
+		if err != nil {
+			return nil, err
+		}
 	}
 	keys, err := cfg.loadKeys()
 	if err != nil {
@@ -48,7 +51,7 @@ func Load(file string, pages ...Registration) (func() error, error) {
 		return nil, errors.New("share: at least one page is required")
 	}
 	s := &service{
-		pageURL:     u,
+		pageURL:     pageURL,
 		keys:        keys,
 		activeKeyID: cfg.ActiveKeyID,
 		pages:       make(map[string]Registration, len(pages)),
