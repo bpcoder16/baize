@@ -51,20 +51,22 @@ func OpenShare(c *gin.Context) {
 
 将模板放在 `app.yaml` 同目录。`pageURL` 要求绝对 HTTPS 地址，可以包含路径和固定查询参数，显式端口范围为 1–65535。`s` 为保留参数。用户凭据、片段、越界端口和无效查询都会导致 Prepare 失败。`activeKeyID` 指向 `keys` 中的签发密钥。每项 `id` 必须唯一，`key` 直接填写 32 个安全随机字节的标准 Base64 编码，可用 `openssl rand -base64 32` 生成。真实密钥只放在部署配置中，各环境和宿主独立用钥。[配置模板](../conf.example/baize.share.yaml)
 
-从旧版 `keyEnv` 配置迁移时，把各环境变量原有的 Base64 值原样填入对应 `id` 的 `key` 字段，并移除 `keyEnv`。保留原编号和密钥内容，迁移前签发的链接即可继续打开。
+从旧版 `keyEnv` 配置迁移时，把各环境变量原有的 Base64 值原样填入对应 `id` 的 `key` 字段，并移除 `keyEnv`。
 
 形如 `https://m.example.com/share?s=<token>` 的完整 URL 最多 2,048 字节。打开端对 token 先检查长度，再按 `s1.<kid>.<Pixiu token>` 选择密钥，以 `baize.share/s1/<kid>` 为用途调用 Pixiu 的 AES-256-GCM 认证解密。Pixiu token 包含自己的 `v1.` 编码版本和随机 nonce。加密发生在受信任的服务端，同一组密钥的持有者可以生成链接。浏览器只需传递 token。
 
 | 加密字段 | 来源与规则 |
 | --- | --- |
-| `createdAt` | 签发时的 Unix 秒数。首版只记录时间。 |
-| `ownerId` | 宿主已确认的分享来源。1–128 个 UTF-8 字节，保留大小写和前导零，拒绝首尾空白和控制字符。 |
-| `handlerName` | 注册的稳定页面名。首位为小写字母，其余可用小写字母、数字、点、下划线和连字符，最多 64 字节。 |
-| `request` | JSON 对象。生成和打开共用同一套还原及校验过程，包括 Gin 的结构体校验器。Go 整数字段按声明的类型还原。 |
+| `t` | 签发时的 Unix 秒数。首版只记录时间。 |
+| `o` | 宿主已确认的分享来源。1–128 个 UTF-8 字节，保留大小写和前导零，拒绝首尾空白和控制字符。 |
+| `p` | 注册的稳定页面名。首位为小写字母，其余可用小写字母、数字、点、下划线和连字符，最多 64 字节。 |
+| `r` | 请求 JSON 对象。生成和打开共用同一套还原及校验过程，包括 Gin 的结构体校验器。Go 整数字段按声明的类型还原。 |
+
+使用旧字段 `createdAt`、`ownerId`、`handlerName`、`request` 签发的链接在升级后返回 `ErrInvalidShare`，需重新签发。
 
 资源 ID 和版本号优先使用具体的 `string`、`int64` 或 `uint64` 字段。默认解码到 `any`、`map[string]any` 或 `[]any` 的 JSON 数字使用 `json.Number`，大整数和小数的文本精度都能保留。handler 可按业务类型调用 `Int64()` 并处理越界错误，或用 `String()` 取得十进制原文。升级时检查原先对动态数字使用 `.(float64)` 的 handler，打开历史链接也会按当前版本的规则解码。若签发方已经把整数转成 `float64` 并发生舍入，链接只能保存签发时的值。
 
-业务权限和资源状态在打开时检查。`ownerId` 表示分享来源，访问者身份取自本次请求。以后可在认证解密后、调用 handler 前按归属和场景实施时效或封禁。若不同版本共用封禁规则，应将 `product.detail.v1` 和 `product.detail.v2` 归入同一业务场景。宿主应从网关和应用日志中排除完整链接、token 与敏感请求内容，分享页面可设置 `Referrer-Policy: no-referrer`。
+业务权限和资源状态在打开时检查。`o` 表示分享来源，访问者身份取自本次请求。以后可在认证解密后、调用 handler 前按归属和场景实施时效或封禁。若不同版本共用封禁规则，应将 `product.detail.v1` 和 `product.detail.v2` 归入同一业务场景。宿主应从网关和应用日志中排除完整链接、token 与敏感请求内容，分享页面可设置 `Referrer-Policy: no-referrer`。
 
 ## 密钥轮换与旧链接
 
@@ -106,4 +108,4 @@ func OpenShare(c *gin.Context) {
 | `share.ErrURLTooLong` | token 或完整 URL 超长。可缩小请求，构建 URL 时也可缩短页面地址或固定查询参数。 |
 | `share.ErrInvalidShare` | token、密钥编号、载荷或目标页面无效。Open 在调用 handler 前返回，宿主可展示统一错误页。 |
 
-服务测试保留了一条独立生成的旧 URL，覆盖密钥切换与误覆盖、两版 request 双向打开、动态数字精度以及缺少版本化 handler 的回滚。装配测试覆盖配置文件中的密钥缺失、格式错误、编号重复及端口越界时的启动失败行为。[服务测试](../service/share/share_test.go) · [装配测试](../bootstrap/shareboot/prepare_test.go)
+服务测试用独立生成的短字段 URL 验证密钥切换与误覆盖，并覆盖两版 request 双向打开、动态数字精度以及缺少版本化 handler 的回滚。装配测试覆盖配置文件中的密钥缺失、格式错误、编号重复及端口越界时的启动失败行为。[服务测试](../service/share/share_test.go) · [装配测试](../bootstrap/shareboot/prepare_test.go)

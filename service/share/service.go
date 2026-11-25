@@ -30,10 +30,10 @@ const (
 )
 
 type envelope struct {
-	CreatedAt   *int64          `json:"createdAt"`
-	OwnerID     string          `json:"ownerId"`
-	HandlerName string          `json:"handlerName"`
-	Request     json.RawMessage `json:"request"`
+	CreatedAt   *int64          `json:"t"`
+	OwnerID     string          `json:"o"`
+	HandlerName string          `json:"p"`
+	Request     json.RawMessage `json:"r"`
 }
 
 // 发布后只读，单次签发或打开始终使用同一份注册表和密钥配置。

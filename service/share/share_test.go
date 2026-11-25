@@ -35,7 +35,7 @@ const product share.Page[productRequest] = "product.detail.v1"
 const productV2 share.Page[*productV2Request] = "product.detail.v2"
 
 // 使用独立 AES-GCM 实现和固定测试密钥生成，时间为 2000 年。不要用当前编码器刷新样本。
-const historicalURL = "https://old.example/share?s=s1.k1.v1.EBESExQVFhcYGRobLDi6-V2UHEUA7qoEv2vOQdZ4gteNbyRghEz6GVJIIVzAvHTbeMxlGfflrcTcA21R4QZMnX4agjRrkuW23j-uTTaRgzDLCKXueTTjmE2ZdE4burQvaXSisgrc3k6QXuO-Z-l15M0GWz4HhbqBHOCDipOxM2f-1aSK_EWPN4gG2HF3gOalXBnfET-DcqfyprMpruXntMgrLQQEwXx3jDZRn9RY"
+const historicalURL = "https://old.example/share?s=s1.k1.v1.ICEiIyQlJicoKSoryNtczRyHvwoyrVbUrOORe-WHSCzby2YwFXPFa-VsjbaIUS8YsglYBALgZcCw-nnkqlHYnCyozt7eDh_S53S3izqqs3OT795eD9Pk2mn5lwjMlAXuSYC5vZ63Vzvou8TS7QgAmY5MJLq_RI1bNzVa815RcGid3FryYn4L5KLlpJndHNcJ"
 
 type testKey struct {
 	id   string
@@ -238,7 +238,7 @@ func TestDynamicNumbersPreserveWireValue(t *testing.T) {
 func TestURLAndGinDispatch(t *testing.T) {
 	request := productRequest{ProductID: "real", Revision: 9007199254740993}
 	var count int
-	activate(t, configFile(t, "k1", k1), product.Register(func(c *gin.Context, got productRequest) {
+	activate(t, configFile(t, "v1", testKey{id: "v1", fill: 1}), product.Register(func(c *gin.Context, got productRequest) {
 		count++
 		if got != request || c.GetString("visitor") != "guest" {
 			t.Fatalf("wrong dispatch: %+v", got)
@@ -259,16 +259,19 @@ func TestURLAndGinDispatch(t *testing.T) {
 		t.Fatalf("fresh nonce: %v", err)
 	}
 	token := tokenFrom(t, link)
+	if !strings.HasPrefix(token, "s1.v1.v1.") {
+		t.Fatal("wrong share token prefix")
+	}
 	box, err := cryptox.NewAESGCM(bytes.Repeat([]byte{1}, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := box.DecryptToken(strings.TrimPrefix(token, "s1.k1."), "baize.share/s1/k1")
+	body, err := box.DecryptToken(strings.TrimPrefix(token, "s1.v1."), "baize.share/s1/v1")
 	var payload struct {
-		CreatedAt   int64          `json:"createdAt"`
-		OwnerID     string         `json:"ownerId"`
-		HandlerName string         `json:"handlerName"`
-		Request     productRequest `json:"request"`
+		CreatedAt   int64          `json:"t"`
+		OwnerID     string         `json:"o"`
+		HandlerName string         `json:"p"`
+		Request     productRequest `json:"r"`
 	}
 	if err != nil || json.Unmarshal(body, &payload) != nil || payload.OwnerID != "merchant:00042" || payload.HandlerName != string(product) || payload.CreatedAt < before || payload.CreatedAt > time.Now().Unix() || payload.Request != request {
 		t.Fatalf("payload: %+v, %v", payload, err)
@@ -288,7 +291,7 @@ func TestURLAndGinDispatch(t *testing.T) {
 	}{
 		{link + "&productId=other", 200},
 		{link + "&s=" + token, 400},
-		{strings.Replace(link, "s=s1.k1.", "s=s1.k2.", 1), 400},
+		{strings.Replace(link, "s=s1.v1.", "s=s1.k2.", 1), 400},
 		{link[:len(link)-4], 400},
 	} {
 		w := httptest.NewRecorder()
@@ -373,15 +376,17 @@ func TestRegistrationAndConcurrentDispatch(t *testing.T) {
 
 func TestOpenRejectsInvalidEnvelopeBeforeDispatch(t *testing.T) {
 	activate(t, configFile(t, "k1", k1), product.Register(func(*gin.Context, productRequest) {
-		t.Fatal("invalid envelope reached handler")
+		t.Error("invalid envelope reached handler")
 	}))
 	box, err := cryptox.NewAESGCM(bytes.Repeat([]byte{1}, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
-	const valid = `{"createdAt":1,"ownerId":"shop","handlerName":"product.detail.v1","request":{"productId":"abc"}}`
+	const valid = `{"t":1,"o":"shop","p":"product.detail.v1","r":{"productId":"abc"}}`
+	const oldFields = `{"createdAt":1,"ownerId":"shop","handlerName":"product.detail.v1","request":{"productId":"abc"}}`
 	for _, tc := range []struct{ name, body, purpose string }{
-		{"missing time", strings.Replace(valid, `"createdAt":1,`, "", 1), "baize.share/s1/k1"},
+		{"old fields", oldFields, "baize.share/s1/k1"},
+		{"missing time", strings.Replace(valid, `"t":1,`, "", 1), "baize.share/s1/k1"},
 		{"missing source", strings.Replace(valid, `"shop"`, `""`, 1), "baize.share/s1/k1"},
 		{"unregistered page", strings.Replace(valid, ".v1", ".v9", 1), "baize.share/s1/k1"},
 		{"null request", strings.Replace(valid, `{"productId":"abc"}`, "null", 1), "baize.share/s1/k1"},
@@ -405,8 +410,8 @@ func TestBuildTokenAtSizeLimit(t *testing.T) {
 	activate(t, configFile(t, "k1", k1), productV2.Register(func(c *gin.Context, req *productV2Request) {
 		c.String(http.StatusOK, "%s", req.SKU)
 	}))
-	// 当前协议下，1404 个 ASCII 字节的 SKU 使这组参数生成的 token 恰好占满 2048 字节。
-	req := &productV2Request{SKU: strings.Repeat("x", 1404)}
+	// 当前协议下，1434 个 ASCII 字节的 SKU 使这组参数生成的 token 恰好占满 2048 字节。
+	req := &productV2Request{SKU: strings.Repeat("x", 1434)}
 	token, err := productV2.Build("owner", req)
 	if err != nil || len(token) != 2048 {
 		t.Fatalf("Build: len=%d, err=%v", len(token), err)
