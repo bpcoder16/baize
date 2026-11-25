@@ -1,6 +1,6 @@
 # Baize 统一分享页面
 
-宿主声明页面名和请求类型，在启动时绑定 Gin handler。签发方传入分享来源的归属 ID 和具体请求即可得到完整 URL。打开端解密后，在访问者当前的 Gin context 上调用对应 handler。链接默认长期有效，可重复访问。宿主决定页面、路由、鉴权、中间件和响应。
+宿主声明页面名和请求类型，在启动时绑定 Gin handler。签发方传入分享来源的归属 ID 和具体请求，通过 `Build` 取得分享 token，通过 `BuildURL` 取得完整 URL。打开端解密后，在访问者当前的 Gin context 上调用对应 handler。链接默认长期有效，可重复访问。宿主决定页面、路由、鉴权、中间件和响应。
 
 ## 注册与调用
 
@@ -29,6 +29,8 @@ func productShareURL(ownerID, productID string) (string, error) {
 ```
 
 将 `prepareShares()` 加入 `Plan.Prepare`。同一个 `Prepare` 可接受多种类型的注册声明。注册失败会中止启动。配置、密钥和全部声明验证通过后服务才对业务可见，退出时随启动资源栈释放。
+
+单独签发时调用 `ProductPage.Build(ownerID, req)`。返回值是查询参数 `s` 的完整值，可直接传给 `share.Open(c, token)`。token 最多 2,048 字节。`BuildURL` 的 2,048 字节上限计入页面地址和所有查询参数。
 
 `pageURL` 可以指向宿主直接渲染的页面，也可以指向将 token 转交给业务 API 的前端页面。宿主的打开入口只取一个 `s` 参数。成功时由页面 handler 写响应，用户重复打开或链接预览均会触发读取。需要改变业务状态的操作应由页面引导用户提交至相应的已鉴权接口。
 
@@ -100,7 +102,8 @@ func OpenShare(c *gin.Context) {
 | --- | --- |
 | `share.ErrUnavailable` | 服务尚未装配或已经释放，按服务不可用处理。 |
 | `share.ErrUnregistered` | 签发使用的页面名或请求类型未在当前启动中注册。 |
-| `share.ErrInvalidRequest`、`share.ErrURLTooLong` | 签发失败，分别检查归属和序列化后的请求，或缩小请求与 URL 的总长度。 |
+| `share.ErrInvalidRequest` | 检查归属 ID 和序列化后的请求。 |
+| `share.ErrURLTooLong` | token 或完整 URL 超长。可缩小请求，构建 URL 时也可缩短页面地址或固定查询参数。 |
 | `share.ErrInvalidShare` | token、密钥编号、载荷或目标页面无效。Open 在调用 handler 前返回，宿主可展示统一错误页。 |
 
 服务测试保留了一条独立生成的旧 URL，覆盖密钥切换与误覆盖、两版 request 双向打开、动态数字精度以及缺少版本化 handler 的回滚。装配测试覆盖配置文件中的密钥缺失、格式错误、编号重复及端口越界时的启动失败行为。[服务测试](../service/share/share_test.go) · [装配测试](../bootstrap/shareboot/prepare_test.go)

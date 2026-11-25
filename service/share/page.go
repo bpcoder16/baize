@@ -35,10 +35,33 @@ func (p Page[T]) Register(handler func(*gin.Context, T)) Registration {
 	return r
 }
 
+// Build 使用当前活动密钥生成分享链接的 s 参数值，可直接传给 [Open]。失败时返回空串。
+// ownerID 由业务校验归属后提供，同一页面允许多次分享。
+func (p Page[T]) Build(ownerID string, req T) (string, error) {
+	return p.buildToken(active.Load(), ownerID, req)
+}
+
 // BuildURL 使用当前活动密钥构造长期分享链接，失败时返回空串。
 // ownerID 由业务校验归属后提供，同一页面允许多次分享。
 func (p Page[T]) BuildURL(ownerID string, req T) (string, error) {
 	s := active.Load()
+	token, err := p.buildToken(s, ownerID, req)
+	if err != nil {
+		return "", err
+	}
+	// 每次复制 URL，仅修改本次生成结果的查询串。
+	page := *s.pageURL
+	query := page.Query()
+	query.Set("s", token)
+	page.RawQuery = query.Encode()
+	link := page.String()
+	if len(link) > maxURLBytes {
+		return "", ErrURLTooLong
+	}
+	return link, nil
+}
+
+func (p Page[T]) buildToken(s *service, ownerID string, req T) (string, error) {
 	if s == nil {
 		return "", ErrUnavailable
 	}
@@ -61,7 +84,7 @@ func (p Page[T]) BuildURL(ownerID string, req T) (string, error) {
 	if _, err = decodeRequest[T](raw, s.validator); err != nil {
 		return "", err
 	}
-	return s.buildURL(string(p), ownerID, raw)
+	return s.encryptToken(string(p), ownerID, raw)
 }
 
 func decodeRequest[T any](raw json.RawMessage, validator binding.StructValidator) (T, error) {

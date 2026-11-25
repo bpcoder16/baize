@@ -52,7 +52,7 @@ func validOwner(owner string) bool {
 		strings.TrimSpace(owner) == owner && strings.IndexFunc(owner, unicode.IsControl) < 0
 }
 
-func (s *service) buildURL(name, owner string, request json.RawMessage) (string, error) {
+func (s *service) encryptToken(name, owner string, request json.RawMessage) (string, error) {
 	now := time.Now().Unix()
 	payload, err := json.Marshal(envelope{
 		CreatedAt:   &now,
@@ -67,20 +67,15 @@ func (s *service) buildURL(name, owner string, request json.RawMessage) (string,
 		return "", ErrURLTooLong
 	}
 	id := s.activeKeyID
-	token, err := s.keys[id].EncryptToken(payload, purposePrefix+id)
+	ciphertext, err := s.keys[id].EncryptToken(payload, purposePrefix+id)
 	if err != nil {
 		return "", err
 	}
-	// 每次复制 URL，仅修改本次生成结果的查询串。
-	page := *s.pageURL
-	query := page.Query()
-	query.Set("s", protocol+"."+id+"."+token)
-	page.RawQuery = query.Encode()
-	link := page.String()
-	if len(link) > maxURLBytes {
+	token := protocol + "." + id + "." + ciphertext
+	if len(token) > maxURLBytes {
 		return "", ErrURLTooLong
 	}
-	return link, nil
+	return token, nil
 }
 
 // Open 在当前 Gin 请求中同步调用指定页面的 handler。分发前失败仅返回错误，

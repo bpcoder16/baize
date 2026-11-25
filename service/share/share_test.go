@@ -401,6 +401,25 @@ func TestOpenRejectsInvalidEnvelopeBeforeDispatch(t *testing.T) {
 	}
 }
 
+func TestBuildTokenAtSizeLimit(t *testing.T) {
+	activate(t, configFile(t, "k1", k1), productV2.Register(func(c *gin.Context, req *productV2Request) {
+		c.String(http.StatusOK, "%s", req.SKU)
+	}))
+	// 当前协议下，1404 个 ASCII 字节的 SKU 使这组参数生成的 token 恰好占满 2048 字节。
+	req := &productV2Request{SKU: strings.Repeat("x", 1404)}
+	token, err := productV2.Build("owner", req)
+	if err != nil || len(token) != 2048 {
+		t.Fatalf("Build: len=%d, err=%v", len(token), err)
+	}
+	assertOpen(t, token, req.SKU)
+
+	req.SKU += "x"
+	token, err = productV2.Build("owner", req)
+	if token != "" || !errors.Is(err, share.ErrURLTooLong) {
+		t.Fatalf("oversized token: len=%d, err=%v", len(token), err)
+	}
+}
+
 func TestFullURLBudgetIncludesFixedQuery(t *testing.T) {
 	path := configFile(t, "k1", k1)
 	input, err := os.ReadFile(path)
@@ -425,6 +444,9 @@ func TestFullURLBudgetIncludesFixedQuery(t *testing.T) {
 		link, err := product.BuildURL("owner", req)
 		if size == 2048 && (err != nil || len(link) != size) || size > 2048 && (link != "" || !errors.Is(err, share.ErrURLTooLong)) {
 			t.Fatalf("size %d: len=%d, err=%v", size, len(link), err)
+		}
+		if _, err := product.Build("owner", req); err != nil {
+			t.Fatalf("Build with fixed query for URL size %d: %v", size, err)
 		}
 		release()
 	}
