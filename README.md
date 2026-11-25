@@ -20,6 +20,7 @@ Pixiu 提供数据库连接、WebSocket、NATS 等基础组件。Baize 在这些
 | 搭建 Go 服务 | 按清单初始化资源，运行 Gin HTTP、Cron、NATS 消费者或 WebSocket 服务，退出时排空请求并回收资源 | [快速开始](#快速开始) |
 | 接入 HTTP 认证 | 应用提供令牌校验函数，Gin 路由选择必须登录或允许游客访问，下游从请求上下文读取身份 | [认证契约](httpauth/doc.go) · [Gin 用法](middleware/ginauth/doc.go) |
 | 让客户端直传文件 | 按场景签发阿里云 OSS 临时凭据，核对对象、批量确认记录并生成访问地址，也支持服务端直接上传 | [OSS 接入指南](docs/oss-upload-integration.md) |
+| 生成可转发的页面链接 | 用类型化请求生成加密链接，由宿主的 Gin 路由分发到对应 handler。在分享配置中按编号填写 Base64 密钥，保留旧密钥和页面版本可持续打开历史链接 | [分享接入与双向兼容](docs/share-design.md) · [轮换配置示例](conf.example/baize.share.yaml) |
 | 可靠地发送业务事件 | 在写业务数据的同一事务中登记 Outbox 消息，提交后投递至 NATS JetStream，由 Cron 补偿待发任务 | [事务发件箱](#事务发件箱) |
 | 向在线客户端推送 | 通过 WebSocket 按用户、设备或 Topic 推送，按 `scene/action` 路由请求，支持 JSON 和 Protobuf | [会话与推送示例](service/realtime/doc.go) |
 | 避免多个任务同时处理同一资源 | 使用单节点 Redis 的固定租期锁，支持等待获取、单次尝试和一次获取多个键 | [锁的使用约定](service/lockx/doc.go) · [Redis 实现](service/lockx/redislock/doc.go) |

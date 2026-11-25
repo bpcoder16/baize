@@ -20,4 +20,5 @@ docs/
 !/docs/
 /docs/*
 !/docs/oss-upload-integration.md
+!/docs/share-design.md
 AGENTS.md

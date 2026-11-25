@@ -1,0 +1,13 @@
+# 指向业务挂载的 HTTPS 页面。显式端口范围为 1–65535，查询参数 s 留给分享凭证。
+pageURL: "https://m.example.com/share"
+
+# 新链接使用 activeKeyID 签发，旧链接按各自的 id 读取原密钥。
+activeKeyID: k1
+keys:
+  - id: k1
+    # 在部署配置中填入 32 个随机字节的标准 Base64 编码，可用 openssl rand -base64 32 生成。
+    key: ""
+  # 轮换时添加 k2，填入新生成的密钥，并将配置部署到所有副本。
+  # 用一条已签发的 k1 链接验证后，再将 activeKeyID 改为 k2。
+  # - id: k2
+  #   key: ""
