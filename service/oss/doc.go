@@ -80,7 +80,7 @@
 //	}
 //	_ = digest
 //
-// 使用 http.DefaultClient 发起 GET，保留其连接和重定向设置，不增加重试或固定超时。
+// 通过 http.DefaultClient 发起 GET，沿用宿主配置的连接池、Cookie、重定向和超时策略。该函数不写调用日志。
 // 仅对 HTTP 200 的完整正文流式计算 MD5，返回 32 位小写十六进制摘要；不解析内容或使用 ETag。
 // 响应正文总会关闭，关闭错误不改变结果。HTTP 404 返回 ossx.ErrObjectNotFound，
 // 其余状态、请求或读取失败可用 errors.Is(err, ErrFileRead) 判断；失败不返回部分摘要。

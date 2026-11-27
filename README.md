@@ -11,7 +11,7 @@
 
 **Baize 是基于 Pixiu 的 Go 业务复用库。** 如果你的多个应用都需要验证请求身份、确认文件上传，或在数据库事务提交后可靠地发送消息，可以直接接入对应的业务包。Baize 也提供统一的启动入口，让 HTTP 服务、定时任务和消息消费者共用一套配置、日志和停机流程。
 
-Pixiu 提供数据库连接、WebSocket、NATS 等基础组件。Baize 在这些组件上实现业务流程，应用负责自己的路由、权限规则和部署配置。[Pixiu 项目](https://github.com/bpcoder16/pixiu)
+Pixiu 提供数据库连接、WebSocket、NATS 等基础组件。Baize 在这些组件上实现业务流程，应用负责自己的路由、权限规则和部署配置。Baize 的 Go 业务代码通过 Pixiu 的 `infra/httpcall` 发送 HTTP 请求。唯一例外是 `oss.MD5FromURL`，它通过 `http.DefaultClient` 流式下载文件并计算摘要，不写调用日志。[Pixiu 项目](https://github.com/bpcoder16/pixiu)
 
 ## 可以用它做什么
 
@@ -19,6 +19,7 @@ Pixiu 提供数据库连接、WebSocket、NATS 等基础组件。Baize 在这些
 | --- | --- | --- |
 | 搭建 Go 服务 | 按清单初始化资源，运行 Gin HTTP、Cron、NATS 消费者或 WebSocket 服务，退出时排空请求并回收资源 | [快速开始](#快速开始) |
 | 接入 HTTP 认证 | 应用提供令牌校验函数，Gin 路由选择必须登录或允许游客访问，下游从请求上下文读取身份 | [认证契约](httpauth/doc.go) · [Gin 用法](middleware/ginauth/doc.go) |
+| 服务间 AppID 鉴权 | Go 调用方签名、Python 接入示例、服务端验签和 Redis 防重放，Gin 路由声明权限 | [接入说明](service/appauth/README.md) · [服务端配置模板](conf.example/baize.appauth.yaml) |
 | 让客户端直传文件 | 按场景签发阿里云 OSS 临时凭据，核对对象、批量确认记录并生成访问地址，也支持服务端直接上传 | [OSS 接入指南](docs/oss-upload-integration.md) |
 | 生成可转发的页面链接 | 用类型化请求生成加密链接，由宿主的 Gin 路由分发到对应 handler。在分享配置中按编号填写 Base64 密钥，保留旧密钥和页面版本可持续打开历史链接 | [分享接入与双向兼容](docs/share-design.md) · [轮换配置示例](conf.example/baize.share.yaml) |
 | 可靠地发送业务事件 | 在写业务数据的同一事务中登记 Outbox 消息，提交后投递至 NATS JetStream，由 Cron 补偿待发任务 | [事务发件箱](#事务发件箱) |

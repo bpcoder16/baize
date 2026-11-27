@@ -1,0 +1,10 @@
+# 启用 appauthboot.Prepare 的服务将此文件复制到入口配置同目录。
+# 单次验签最多读取的原始正文字节数。省略或填 0 时使用 1 MiB。
+maxBodyBytes: 1048576
+clients:
+  - appID: order-service
+    # 在部署配置中填入 32 个随机字节的十六进制编码，可用 openssl rand -hex 32 生成。
+    appSecret: ""
+    permissions:
+      - users.read
+# 显式设置 clients: [] 可以停用所有调用方。

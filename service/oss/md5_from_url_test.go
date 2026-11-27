@@ -1,6 +1,7 @@
 package oss_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,7 +17,31 @@ import (
 
 	ossservice "github.com/bpcoder16/baize/service/oss"
 	"github.com/bpcoder16/pixiu/infra/aliyun/ossx"
+	"github.com/bpcoder16/pixiu/logit"
 )
+
+func TestMD5FromURLDoesNotLog(t *testing.T) {
+	var output bytes.Buffer
+	previous := logit.Default()
+	logit.SetDefault(logit.MustNew(logit.OptWriter(logit.NewWriter(&output))))
+	t.Cleanup(func() { logit.SetDefault(previous) })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/missing" {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	if _, err := ossservice.MD5FromURL(t.Context(), server.URL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ossservice.MD5FromURL(t.Context(), server.URL+"/missing"); !errors.Is(err, ossx.ErrObjectNotFound) {
+		t.Fatalf("expected object not found, got %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("下载产生了调用日志：%s", output.String())
+	}
+}
 
 func TestMD5FromURLHashesResponseContent(t *testing.T) {
 	for _, tc := range []struct {
