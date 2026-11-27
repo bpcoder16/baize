@@ -125,6 +125,8 @@ router.POST("/v1/users", ginappauth.Require("users.read", nil), func(c *gin.Cont
 
 服务端接受时间戳与服务端时间相差不超过 2 分钟的签名（含边界）。验签与权限检查通过后，通过 Redis 的原子 SET NX 写入 `baize:appauth:v1:<AppName>:<AppID>:<nonce>`。命名空间取自 `env.appName`。debug、test 和 release 通过独立的 Redis 实例或 DB 隔离。同一环境内，同一服务的各副本使用相同的应用名和 Redis DB，并同步时钟。nonce 记录从首次接收起保留 241 秒，覆盖允许提前到达的签名。防重放依赖这些记录在有效期内保留；部署时应为这部分键预留容量。验签中间件应安装在改写 URL 或消耗正文的中间件之前。
 
+启用 Gin 访问日志时，受保护路由的 `HTTPRequest` 记录包含 `appauth_permission`（路由要求的权限）和 `appauth_result`（鉴权结果）。放行时结果为 `allowed`，并记录已验证的 `app_id`。拒绝时省略 `app_id`，结果为 `missing_credentials`、`invalid_credentials`、`forbidden`、`body_too_large` 或 `unavailable`。宿主自定义的 HTTP 状态单独记录在 `status` 字段。访问日志沿用 `gin.yaml` 的 `disableAccessLog` 开关，默认的请求和响应详情配置即可记录上述字段。
+
 默认响应如下。宿主可通过 `ginappauth.Require(permission, writeFailure)` 自定义中止请求后的错误记录、HTTP 状态及业务码。
 
 | 条件 | 默认 HTTP 状态 | 错误标识 |

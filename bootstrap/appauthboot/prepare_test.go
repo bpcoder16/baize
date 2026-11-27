@@ -1,10 +1,13 @@
 package appauthboot_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +26,7 @@ import (
 	"github.com/bpcoder16/baize/middleware/ginappauth"
 	"github.com/bpcoder16/baize/service/appauth"
 	"github.com/bpcoder16/baize/service/appauth/appsign"
+	"github.com/bpcoder16/pixiu/infra/ginx"
 	"github.com/bpcoder16/pixiu/infra/httpcall"
 	"github.com/bpcoder16/pixiu/lifecycle"
 	"github.com/gin-gonic/gin"
@@ -52,7 +56,7 @@ func TestAppAuthPlan(t *testing.T) {
 	}
 	t.Chdir(dir)
 	store := miniredis.RunT(t)
-	write("app.yaml", "env: {appName: profiles, runMode: test, timeLocation: UTC, localIP: 127.0.0.1}\nlog: {format: text, hookStd: false}\n")
+	write("app.yaml", "env: {appName: profiles, runMode: test, timeLocation: UTC, localIP: 127.0.0.1}\nlog: {format: json, hookStd: false}\n")
 	write("redis.cache.yaml", fmt.Sprintf("host: %s\nport: %s\nmaxRetries: -1\n", store.Host(), store.Port()))
 	key := strings.Repeat("ab", 32)
 	write("baize.appauth.yaml", strings.Replace(string(template), `appSecret: ""`, `appSecret: "`+key+`"`, 1))
@@ -75,6 +79,7 @@ func TestAppAuthPlan(t *testing.T) {
 	if err := bootstrap.Run(t.Context(), filepath.Join(dir, "app.yaml"), plan); err != nil {
 		t.Fatal(err)
 	}
+	checkAccessLogs(t)
 	r := httptest.NewRequest("POST", "/users", nil)
 	if _, err := appauth.Authorize(r, "users.read"); !errors.Is(err, appauth.ErrUnavailable) {
 		t.Fatalf("启动计划退出后仍有验证器：%v", err)
@@ -83,7 +88,10 @@ func TestAppAuthPlan(t *testing.T) {
 
 func checkRoutes(t *testing.T, ctx context.Context, client *httpcall.Client, store *miniredis.Miniredis) {
 	t.Helper()
-	router := gin.New()
+	router, err := ginx.New(ginx.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	const body = `{"userIds":[42]}`
 	router.POST("/users", ginappauth.Require("users.read", nil), func(c *gin.Context) {
@@ -147,6 +155,9 @@ func checkRoutes(t *testing.T, ctx context.Context, client *httpcall.Client, sto
 	if w := call("/private", body, makeHeaders("/private")); w.Body.String() != `{"code":10004}` {
 		t.Fatal("未使用宿主的失败处理")
 	}
+	if w := call(target, strings.Repeat("x", (1<<20)+1), headers); w.Code != 413 {
+		t.Fatalf("超长正文返回 %d", w.Code)
+	}
 	if len(store.Keys()) != 0 {
 		t.Fatal("鉴权失败占用了 nonce")
 	}
@@ -178,8 +189,66 @@ func checkRoutes(t *testing.T, ctx context.Context, client *httpcall.Client, sto
 	if ttl := store.TTL(wantKey); ttl != 241*time.Second {
 		t.Fatalf("nonce TTL = %v，预期 241 秒", ttl)
 	}
+	quiet, err := ginx.New(ginx.Config{DisableAccessLog: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, engine := range []*gin.Engine{quiet, gin.New()} {
+		engine.POST("/quiet", ginappauth.Require("quiet.read", nil))
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest("POST", "/quiet", nil))
+		if w.Code != 401 {
+			t.Fatalf("未安装或关闭访问日志时缺少凭证返回 %d", w.Code)
+		}
+	}
 	store.SetError("ERR unavailable")
 	if w := call(target, body, makeHeaders(target)); w.Code != 503 {
 		t.Fatal("Redis 故障时未关闭访问")
+	}
+}
+
+func checkAccessLogs(t *testing.T) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("log", "profiles", "biz", "info.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		Permission string `json:"appauth_permission"`
+		Result     string `json:"appauth_result"`
+		Status     int    `json:"status"`
+	}
+	got := map[outcome]int{}
+	for line := range bytes.Lines(data) {
+		var entry struct {
+			outcome
+			Message string  `json:"msg"`
+			AppID   *string `json:"app_id"`
+		}
+		if err := json.Unmarshal(line, &entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry.Message != "HTTPRequest" {
+			continue
+		}
+		if entry.Result == "allowed" {
+			if entry.AppID == nil || *entry.AppID != "order-service" {
+				t.Errorf("放行日志缺少已验证的 AppID：%s", line)
+			}
+		} else if entry.AppID != nil {
+			t.Errorf("拒绝日志包含 app_id：%s", line)
+		}
+		got[entry.outcome]++
+	}
+	want := map[outcome]int{
+		{"users.read", "allowed", 200}:             1,
+		{"users.read", "missing_credentials", 401}: 1,
+		{"users.read", "invalid_credentials", 401}: 14, // 三次无效请求及十一次并发重放。
+		{"other.permission", "forbidden", 200}:     1,
+		{"users.read", "body_too_large", 413}:      1,
+		{"users.read", "unavailable", 503}:         1,
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("HTTPRequest 鉴权记录 = %v，预期 %v", got, want)
 	}
 }
