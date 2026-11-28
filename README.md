@@ -109,7 +109,7 @@ func main() {
 | 迁表与种子数据 | MySQL 和 PostgreSQL 均可在 `Prepare` 阶段执行迁移。每次部署由一个进程开启迁移。使用种子数据时，指定范围内的行数与预期不符会触发该范围的删除与重新导入。[MySQL 迁移](conf.example/mysql-migrate.default.yaml) · [PostgreSQL 迁移](conf.example/postgresql-migrate.default.yaml) |
 | Redis 与业务锁 | `redisboot.PrepareLock(name, redisName, cfg)` 借用已声明的 Redis 实例。用于锁的连接须配置 `maxRetries: -1`，业务通过 `lockx.Named(name)` 取得执行器。[Redis 配置](conf.example/redis.default.yaml) |
 | NATS 与 JetStream | 一个命名连接可用于 Core 和 JetStream 发布。需要消费时，每个实例声明一个消费服务，在订阅配置中按名称绑定 Handler。[连接配置](conf.example/nats.default.yaml) · [订阅配置](conf.example/nats-register.default.yaml) |
-| HTTP、Cron 与 WebSocket | HTTP 监听和 Gin 中间件分别配置。Cron 支持固定间隔、Cron 表达式和随机间隔，Realtime 使用独立监听地址。[HTTP](conf.example/http.yaml) · [Gin](conf.example/gin.yaml) · [Cron](conf.example/cron.yaml) · [Realtime](conf.example/realtime.app.yaml) |
+| HTTP、Cron 与 WebSocket | HTTP 监听和 Gin 中间件分别配置。服务间接口可在 `gin.yaml` 中设置 `requireLogID: true`，强制调用方传入 `PIXIU-Log-Id`。Cron 支持固定间隔、Cron 表达式和随机间隔，Realtime 使用独立监听地址。[HTTP](conf.example/http.yaml) · [Gin](conf.example/gin.yaml) · [Cron](conf.example/cron.yaml) · [Realtime](conf.example/realtime.app.yaml) |
 | Elasticsearch | 按集群主版本导入 `bootstrap/elasticsearchboot/v7`、`v8` 或 `v9`，启动时校验版本。[连接配置](conf.example/elasticsearch.default.yaml) |
 | 阿里云 | 按需声明对象存储、临时凭据或 Elasticsearch 管理端客户端。每个 OSS 实例绑定一个 Bucket。[OSS](conf.example/aliyunossx.default.yaml) · [STS](conf.example/aliyunstsx.oss.yaml) · [ES 管理端](conf.example/aliyunesx.search-control.yaml) |
 

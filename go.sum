@@ -78,8 +78,8 @@ github.com/andybalholm/brotli v1.3.0 h1:IdkhjSe/+34U+fP7FSR2Q6Poj1hnHUa2GoWmzXJd
 github.com/andybalholm/brotli v1.3.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/antithesishq/antithesis-sdk-go v0.9.0 h1:JQpWOgYSYBb9HqgPtaXBswHxZFmOnXRsPFDI0yeCJWM=
 github.com/antithesishq/antithesis-sdk-go v0.9.0/go.mod h1:FQyySiasQQM8735Ddel3MRojmy4dA1IqCeyJ5jmPMbI=
-github.com/bpcoder16/pixiu v0.3.1 h1:JELM2RljEwOfSaDE8UpG+VM6wzk7QSYSb8mJMO1+zrs=
-github.com/bpcoder16/pixiu v0.3.1/go.mod h1:vJhzCnu9nRjPmbu0CCoXEW7+oiFOZdWF3Jx+0AfekKg=
+github.com/bpcoder16/pixiu v0.3.2 h1:eM63OgWgvxXCEx1feuuHkd9cRrMTgzKYaFFFkLgzNcM=
+github.com/bpcoder16/pixiu v0.3.2/go.mod h1:vJhzCnu9nRjPmbu0CCoXEW7+oiFOZdWF3Jx+0AfekKg=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=

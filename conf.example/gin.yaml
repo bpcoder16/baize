@@ -1,6 +1,9 @@
-# 与 app.yaml 放在同一目录，配置 Gin 的可信代理和访问日志。
+# 与 app.yaml 放在同一目录，配置 Gin 的可信代理、请求日志 ID 和访问日志。
 
 trustedProxies: []  # 可信代理 IP 或 CIDR，空列表表示直接使用对端 IP
+
+# 开启后，缺少 PIXIU-Log-Id 或值为空白的请求返回 HTTP 400。此规则也适用于探针和 CORS 预检。
+requireLogID: false
 
 loggerName: ""           # 对应 app.yaml 的 log.names，留空沿用请求上下文的日志配置
 disableAccessLog: false  # 设为 true 关闭访问日志和详情采集，仍记录 panic

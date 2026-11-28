@@ -82,7 +82,11 @@ func TestGin(t *testing.T) {
 	if _, err := decl.Build(t.Context(), dir); err == nil || !strings.Contains(err.Error(), "gin.yaml") || !strings.Contains(err.Error(), "allowOrigins") {
 		t.Fatalf("跨域规则错误缺少配置位置: %v", err)
 	}
-	write("gin.yaml", `disableAccessLog: true
+	template, err := os.ReadFile("../../conf.example/gin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("gin.yaml", string(template)+`
 cors:
   - pathPrefix: /probe
     allowOrigins: ["https://web.example.com"]
@@ -126,5 +130,27 @@ cors:
 	}
 	if err := service.Run(); err != nil {
 		t.Fatalf("停收后启动得到 %v", err)
+	}
+
+	write("gin.yaml", "requireLogID: true\n")
+	if _, err := decl.Build(t.Context(), dir); err != nil {
+		t.Fatalf("通过 gin.yaml 启用 requireLogID：%v", err)
+	}
+	for _, tc := range []struct {
+		id     string
+		status int
+	}{
+		{"", http.StatusBadRequest},
+		{"upstream-id", http.StatusNoContent},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+		if tc.id != "" {
+			req.Header.Set(ginx.TraceHeader, tc.id)
+		}
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		if w.Code != tc.status {
+			t.Fatalf("启用 requireLogID 后，logId=%q 返回 %d，预期 %d", tc.id, w.Code, tc.status)
+		}
 	}
 }

@@ -23,7 +23,7 @@ AppID 匹配 `[A-Za-z0-9._-]{1,128}`。AppSecret 由 32 个随机字节编码为
 
 ## Go
 
-每个下游在初始化时创建一次客户端，后续可并发复用。每次调用通过 `client.Request(ctx)` 创建请求。签名在 Resty 完成路径和正文序列化后写入，业务可直接传 JSON 对象或原始字节。
+每个下游在初始化时创建一次客户端，后续可并发复用。每次调用通过 `client.Request(ctx)` 创建请求。客户端默认将 ctx 中已有的 `logId` 通过 `PIXIU-Log-Id` 请求头传给下游，显式设置的请求头优先。创建客户端时传入 `httpcall.OptPropagateLogID(false)` 可关闭自动透传。签名在 Resty 完成路径和正文序列化后写入，业务可直接传 JSON 对象或原始字节。
 
 ```go
 import (

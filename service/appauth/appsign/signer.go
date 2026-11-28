@@ -19,6 +19,7 @@ import (
 )
 
 // NewClient 为一个下游创建可并发复用的签名客户端。凭证在初始化时校验。
+// 默认透传当前请求的 logId，可通过 httpcall.OptPropagateLogID(false) 关闭。
 // 签名占用 Resty 的 PreRequestHook，并将重定向响应交回调用方。
 func NewClient(name, appID, appSecret string, opts ...httpcall.Option) (*httpcall.Client, error) {
 	mac, err := appsigv1.NewMAC(appID, appSecret)
@@ -37,7 +38,8 @@ func NewClient(name, appID, appSecret string, opts ...httpcall.Option) (*httpcal
 			)
 		},
 	)
-	return httpcall.New(name, append(slices.Clip(opts), sign)...), nil
+	opts = slices.Concat([]httpcall.Option{httpcall.OptPropagateLogID(true)}, opts, []httpcall.Option{sign})
+	return httpcall.New(name, opts...), nil
 }
 
 func signRequest(req *http.Request, appID string, mac *cryptox.HMACSHA256) error {

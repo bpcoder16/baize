@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bpcoder16/pixiu/infra/httpcall"
+	"github.com/bpcoder16/pixiu/logit"
 	"github.com/go-resty/resty/v2"
 )
 
@@ -110,5 +111,40 @@ func TestSignedClientStopsRedirectsAndRejectsConnect(t *testing.T) {
 	}
 	if _, err := client.Request(t.Context()).Execute(http.MethodConnect, src.URL); err == nil {
 		t.Error("unexpected signed CONNECT")
+	}
+}
+
+func TestSignedClientPropagatesLogID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(httpcall.TraceHeader, r.Header.Get(httpcall.TraceHeader))
+	}))
+	defer server.Close()
+	ctx := logit.WithContextLogID(t.Context())
+	id, _ := logit.LogIDFromContext(ctx)
+	for _, tc := range []struct {
+		name, header, want string
+		opts               []httpcall.Option
+	}{
+		{name: "默认透传", want: id},
+		{name: "显式关闭", opts: []httpcall.Option{httpcall.OptPropagateLogID(false)}},
+		{name: "显式请求头优先", header: "manual-id", want: "manual-id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := NewClient("profiles", "example", strings.Repeat("ab", 32), tc.opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := client.Request(ctx)
+			if tc.header != "" {
+				req.SetHeader(httpcall.TraceHeader, tc.header)
+			}
+			resp, err := req.Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := resp.Header().Get(httpcall.TraceHeader); got != tc.want {
+				t.Errorf("下游收到 logId %q，预期 %q", got, tc.want)
+			}
+		})
 	}
 }

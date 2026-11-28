@@ -22,6 +22,7 @@ import (
 type ginConfig struct {
 	TrustedProxies   []string        `mapstructure:"trustedProxies"`
 	LoggerName       string          `mapstructure:"loggerName"`
+	RequireLogID     bool            `mapstructure:"requireLogID"`
 	DisableAccessLog bool            `mapstructure:"disableAccessLog"`
 	LogRequestInfo   bool            `mapstructure:"logRequestInfo"`
 	LogResponseInfo  bool            `mapstructure:"logResponseInfo"`
@@ -59,6 +60,7 @@ func build(dir string, register func(*gin.Engine), modules []ginx.OpenAPIModule)
 	engineConfig := ginx.Config{
 		TrustedProxies:   cfg.TrustedProxies,
 		LoggerName:       cfg.LoggerName,
+		RequireLogID:     cfg.RequireLogID,
 		DisableAccessLog: cfg.DisableAccessLog,
 		LogRequestInfo:   cfg.LogRequestInfo,
 		LogResponseInfo:  cfg.LogResponseInfo,
